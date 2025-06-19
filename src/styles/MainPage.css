@@ -210,3 +210,132 @@
   font-size: 0.8rem;
   color: #777;
 }
+
+.task-list-container {
+  /* 업무 목록을 감싸는 컨테이너가 있다면 여기에 스타일 추가 */
+  width: 100%;
+}
+
+.task-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.task-item {
+  background-color: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+
+  display: flex;
+  flex-direction: column;
+}
+
+.task-item-container {
+  display: flex;
+  flex-direction: row;
+}
+
+.task-info-main {
+  margin-bottom: 15px;
+}
+
+.task-info-main h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 1.25em;
+  color: #2c3e50;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.task-info-main h3 .status {
+  font-size: 0.8em;
+  padding: 5px 12px; /* 패딩 조정 */
+  border-radius: 15px; /* 더 둥글게 */
+  color: white;
+  margin-left: 10px; /* 제목과의 간격 */
+  white-space: nowrap; /* 상태 텍스트 줄바꿈 방지 */
+  /* 상태별 배경색은 이전과 동일하게 또는 아래처럼 */
+}
+/* 예시: 상태별 스타일 개선 */
+.status.status-todo {
+  background-color: #3498db;
+} /* 파란색 계열 */
+.status.status-doing {
+  background-color: #f1c40f;
+  color: #333;
+} /* 노란색 계열 */
+.status.status-done {
+  background-color: #2ecc71;
+} /* 녹색 계열 */
+.status.status-pending {
+  background-color: #95a5a6;
+} /* 회색 계열 */
+.status.status-unknown {
+  background-color: #ecf0f1;
+  color: #7f8c8d;
+}
+
+.task-description-preview {
+  font-size: 0.95em; /* 폰트 크기 약간 키움 */
+  color: #555;
+  line-height: 1.6; /* 줄 간격 조정 */
+  margin-bottom: 12px; /* small 정보와의 간격 */
+}
+
+.task-info-main small {
+  font-size: 0.85em; /* 폰트 크기 약간 키움 */
+  color: #7f8c8d; /* 색상 변경 */
+  display: block;
+  margin-top: 4px;
+}
+
+.task-item-actions {
+  display: flex;
+  justify-content: flex-end; /* 버튼 오른쪽 정렬 */
+  align-items: center;
+  margin-top: auto; /* 중요: task-item이 flex-direction: column일 때, 이 요소를 하단에 붙임 */
+  padding-top: 15px; /* 정보 영역과의 간격 */
+  border-top: 1px solid #ecf0f1; /* 구분선 색상 변경 */
+}
+
+.task-item-actions button {
+  background-color: transparent;
+  border: 1px solid #bdc3c7; /* 테두리 색상 */
+  color: #34495e; /* 글자 색상 */
+  padding: 8px 15px; /* 패딩 조정 */
+  border-radius: 5px; /* 모서리 둥글게 */
+  cursor: pointer;
+  font-size: 0.9em; /* 폰트 크기 */
+  margin-left: 10px; /* 버튼 간 간격 */
+  transition: all 0.2s ease-in-out; /* 부드러운 전환 효과 */
+}
+
+.task-item-actions button:hover {
+  background-color: #ecf0f1; /* 호버 시 배경색 */
+  border-color: #95a5a6; /* 호버 시 테두리 색상 */
+}
+
+.task-item-actions .comments-btn {
+  background-color: #3498db; /* 댓글 버튼 주 색상 */
+  color: white;
+  border-color: #3498db;
+}
+.task-item-actions .comments-btn:hover {
+  background-color: #2980b9; /* 댓글 버튼 호버 시 더 진한 색 */
+  border-color: #2980b9;
+}
+.task-item-actions .delete-btn {
+  border-color: #e74c3c;
+  color: #e74c3c;
+}
+.task-item-actions .delete-btn:hover {
+  background-color: #e74c3c;
+  color: white;
+}

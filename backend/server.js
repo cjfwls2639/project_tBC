@@ -965,9 +965,15 @@ app.delete("/api/tasks/:id", (req, res) => {
 app.get("/api/tasks/:taskId/comments", (req, res) => {
   const { taskId } = req.params;
   const sql = `
-        SELECT c.*, u.username
+        SELECT 
+            c.comment_id,      
+            c.task_id,
+            c.user_id,
+            c.content,         
+            c.created_at,
+            u.username         
         FROM comments c
-        JOIN users u ON c.user_id = u.id
+        JOIN users u ON c.user_id = u.user_id  
         WHERE c.task_id = ?
         ORDER BY c.created_at ASC
     `;
@@ -1007,6 +1013,60 @@ app.post("/api/tasks/:taskId/comments", (req, res) => {
     res
       .status(201)
       .json({ message: "댓글이 성공적으로 작성되었습니다.", id: newCommentId });
+  });
+});
+
+// 6.3. 댓글 삭제 (새로 추가)
+app.delete("/api/comments/:commentId", (req, res) => {
+  const { commentId } = req.params;
+  const { userId } = req.body; // 요청 본문에서 요청자 ID를 받음 (프론트에서 data: { userId: ... } 로 보내야 함)
+
+  if (!userId) {
+    return res.status(400).json({ error: "요청자 ID(userId)가 필요합니다." });
+  }
+
+  // 1. 먼저 해당 댓글이 존재하는지, 그리고 요청자가 작성자인지 확인
+  const ветеркSql = "SELECT user_id FROM comments WHERE comment_id = ?"; // 'ветеркSql' -> 'checkOwnerSql'
+  db.query(ветеркSql, [commentId], (err, results) => {
+    // 'ветеркSql' -> 'checkOwnerSql'
+    if (err) {
+      console.error("Error checking comment owner:", err);
+      return res
+        .status(500)
+        .json({ error: "댓글 정보 확인 중 오류가 발생했습니다." });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: "삭제할 댓글을 찾을 수 없습니다." });
+    }
+
+    const commentOwnerId = results[0].user_id;
+    if (commentOwnerId !== parseInt(userId)) {
+      // DB에서 가져온 user_id와 요청으로 온 userId 비교 (타입 일치 중요)
+      return res.status(403).json({ error: "댓글을 삭제할 권한이 없습니다." });
+    }
+
+    // 2. 권한이 확인되면 댓글 삭제 실행
+    const deleteSql = "DELETE FROM comments WHERE comment_id = ?";
+    db.query(deleteSql, [commentId], (deleteErr, deleteResult) => {
+      if (deleteErr) {
+        console.error("Error deleting comment:", deleteErr);
+        return res
+          .status(500)
+          .json({ error: "댓글 삭제 중 오류가 발생했습니다." });
+      }
+
+      if (deleteResult.affectedRows === 0) {
+        // 이 경우는 거의 발생하지 않아야 함 (이미 위에서 존재 여부 확인)
+        return res
+          .status(404)
+          .json({ error: "삭제할 댓글을 찾을 수 없습니다 (삭제 단계)." });
+      }
+
+      // TODO: 활동 로그 기록 (예: 댓글 삭제됨)
+      res.status(200).json({ message: "댓글이 성공적으로 삭제되었습니다." });
+      // 또는 내용 없이 성공만 알리려면 res.status(204).send();
+    });
   });
 });
 
