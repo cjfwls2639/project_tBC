@@ -16,7 +16,7 @@ const GOOGLE_CLIENT_ID =
   "832194991147-jesr1urnhqk5ul4h4ri1o6puhlh38vuh.apps.googleusercontent.com"; // 실제 클라이언트 ID로 교체
 const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
-// 활동 로그 기록 함수 (예시)
+// 활동 로그 기록 함수
 const logActivity = async (
   connection,
   userId,
@@ -35,7 +35,7 @@ const logActivity = async (
       actionType,
       JSON.stringify(details),
     ]);
-    console.log(`Activity logged: ${actionType}`);
+    console.log(`[${actionType}] by user ${userId} for project ${projectId}`);
   } catch (err) {
     console.error("Error logging activity in transaction:", err);
     throw err;
@@ -418,7 +418,19 @@ app.delete("/api/projects/:id", async (req, res) => {
         .json({ error: "프로젝트 소유자만 삭제할 수 있습니다." });
     }
 
-    // 4. 소유자가 맞다면 프로젝트 삭제 진행
+    //4. 콘솔에 프로젝트 삭제 로그 띄우기
+    await logActivity(
+      connection,
+      userId,
+      id,
+      null,
+      "PROJECT_DELETED",
+      {
+        projectName: projectRows[0].project_name,
+      }
+    );
+
+    // 5. 소유자가 맞다면 프로젝트 삭제 진행
     const [deleteResult] = await connection.query(
       "DELETE FROM projects WHERE project_id = ?", // project_id로 컬럼명 수정
       [id]
