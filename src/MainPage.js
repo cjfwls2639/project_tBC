@@ -466,16 +466,23 @@ useEffect(() => {
                     {/* 메인 화면에서 메인 버튼을 누를 시 뜨는 화면 */}
                     {selectedTab === "메인" && (
                     <div>
-                      <h2>메인 현황</h2>
-                      <p><strong>프로젝트 이름:</strong> {selectedProject.project_name}</p>
-                      <p>
-                      <strong>종료일:</strong> {formatDate(selectedProject.end_date)}{" "}
-                      <strong style={{ color: "red" }}>({calculateDDay(selectedProject.end_date)})</strong>
-                      </p>
-                      <p><strong>프로젝트 설명:</strong> {selectedProject.content || "설명이 없습니다."}</p>
-                      <p><strong>달성률:</strong> {selectedProject.progress || 0}%</p>
+                      <h2> 프로젝트 요약 </h2>
+                        <p>
+                          <strong>프로젝트 마감일:</strong> {formatDate(selectedProject.end_date)}{" "}
+                          <strong style={{ color: "red" }}>({calculateDDay(selectedProject.end_date)})</strong>
+                        </p>
+                          <p><strong>달성률:</strong> {50}%</p>
+
+                        <div className="progress-bar-wrapper">
+                          <div
+                            className="progress-bar-fill"
+                            style={{ width: `${50}%` }}
+                          ></div>
+                        </div>
                     </div>
-                  )}
+                    )}
+                    <p><strong>프로젝트 이름:</strong> {selectedProject.project_name}</p>
+                    <p><strong>프로젝트 설명:</strong> {selectedProject.content || "설명이 없습니다."}</p>
 
                   {/* 메인 화면에서 업무 버튼을 누를 시 뜨는 화면 */}
                   {selectedTab === "업무" && (
