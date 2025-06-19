@@ -21,7 +21,7 @@
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   width: 100%;
   margin: 0 auto;
-  min-height: 70vh;
+  min-height: auto;
   display: flex;
   flex-direction: column;
   gap: 20px;

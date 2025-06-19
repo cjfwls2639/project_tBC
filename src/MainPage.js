@@ -6,6 +6,18 @@ import "./styles/Sidebar.css";
 import "./styles/NavigationBar.css";
 import "./styles/MainContent.css";
 
+const calculateDDay = (endDate) => {
+  if (!endDate) return "없음";
+  const today = new Date();
+  const target = new Date(endDate);
+  const diff = Math.ceil((target - today) / (1000 * 60 * 60 * 24));
+  return diff > 0 ? `D-${diff}` : diff === 0 ? "D-DAY" : `D+${Math.abs(diff)}`;
+};
+
+const formatDate = (dateString) => {
+  if (!dateString) return "없음";
+  return new Date(dateString).toLocaleDateString("ko-KR");
+};
 
 const ProjectModal = ({ isOpen, onClose, onSubmit }) => {
   const [projectName, setProjectName] = useState("");
@@ -464,8 +476,28 @@ useEffect(() => {
                     {selectedProject === null && <p>프로젝트를 선택해주세요</p>}
                   </div>
                   <div className="project-details-content">
-                    {/* TODO: 이 부분도 동적으로 DB 데이터와 연결 (예시: selectedProject.description) */}
-                    {selectedTab === "로그" ? (
+                    {/* 메인 화면에서 메인 버튼을 누를 시 뜨는 화면 */}
+                    {selectedTab === "메인" && (
+                    <div>
+                      <h2>메인 현황</h2>
+                      <p><strong>프로젝트 이름:</strong> {selectedProject.project_name}</p>
+                      <p><strong>종료일:</strong> {formatDate(selectedProject.end_date)}</p>
+                      <p><strong>D-Day:</strong> {calculateDDay(selectedProject.end_date)}</p>
+                      <p><strong>프로젝트 설명:</strong> {selectedProject.content || "설명이 없습니다."}</p>
+                      <p><strong>달성률:</strong> {selectedProject.progress || 0}%</p>
+                    </div>
+                  )}
+
+                  {/* 메인 화면에서 업무 버튼을 누를 시 뜨는 화면 */}
+                  {selectedTab === "업무" && (
+                  <div>
+                      <h2>업무 현황</h2>
+                      {/* 업무 내용 렌더링 */}
+                  </div>
+                  )}
+
+                   {/* 메인 화면에서 로그 버튼을 누를 시 뜨는 화면 */}
+                    {selectedTab === "로그" && (
                   <div>
                     <h2>활동 로그</h2>
                     {activityLogs.length === 0 ? (
@@ -480,13 +512,16 @@ useEffect(() => {
                       </ul>
                     )}
                   </div>
-                ) : (
-                  <>
-                    <h2>{selectedTab} 현황</h2>
-                    <p>프로젝트 설명: {selectedProject.content || "설명이 없습니다."}</p>
-                    <p>소유자: {selectedProject.created_by}</p>
-                  </>
                 )}
+
+                {/* 메인 화면에서 알람 버튼을 누를 시 뜨는 화면 */}
+                {selectedTab === "알람" && (
+                <div>
+                  <h2> 알람 </h2>
+                  {/* 알림 내용 렌더링 */}
+                </div>
+                )}
+
                 {selectedTab === "사용자" && (
                   <div>
                     <h2>프로젝트 참여자 ({projectUsers.length}명)</h2>
