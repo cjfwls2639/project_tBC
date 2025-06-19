@@ -2,7 +2,8 @@ const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const bcrypt = require("bcrypt");
-const db = require("./db"); // db.js 설정은 기존과 동일하다고 가정합니다.
+const db = require("./db");
+const { OAuth2Client } = require("google-auth-library");
 
 const app = express();
 const PORT = 5000;
@@ -11,9 +12,19 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// --- Helper Functions (나중에 별도 모듈로 분리 가능) ---
+const GOOGLE_CLIENT_ID =
+  "832194991147-jesr1urnhqk5ul4h4ri1o6puhlh38vuh.apps.googleusercontent.com"; // 실제 클라이언트 ID로 교체
+const client = new OAuth2Client(GOOGLE_CLIENT_ID);
+
 // 활동 로그 기록 함수 (예시)
-const logActivity = async (connection, userId, projectId, taskId, actionType, details) => {
+const logActivity = async (
+  connection,
+  userId,
+  projectId,
+  taskId,
+  actionType,
+  details
+) => {
   const sql =
     "INSERT INTO activity_logs (user_id, project_id, task_id, action_type, details) VALUES (?, ?, ?, ?, ?)";
   try {
@@ -75,8 +86,8 @@ app.post("/api/login", (req, res) => {
       .status(400)
       .json({ error: "사용자 이름과 비밀번호를 입력해주세요." });
   }
-  
-// 테이블명 'users', 컬럼명 'user_id', 'password' 사용
+
+  // 테이블명 'users', 컬럼명 'user_id', 'password' 사용
   const sql =
     "SELECT user_id, username, password, email FROM users WHERE username = ?";
   db.query(sql, [username], async (err, results) => {
@@ -101,6 +112,96 @@ app.post("/api/login", (req, res) => {
       email: user.email,
     });
   });
+});
+
+// --- Google 로그인 인증 API ---
+app.post("/api/auth/google", async (req, res) => {
+  const { token } = req.body; // 프론트에서 보낸 ID 토큰
+
+  if (!token) {
+    return res.status(400).json({ message: "ID token not provided." });
+  }
+
+  try {
+    // ID 토큰 검증
+    const ticket = await client.verifyIdToken({
+      idToken: token,
+      audience: GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+
+    const googleUserId = payload.sub; // 구글 사용자의 고유 ID
+    const email = payload.email;
+    const name = payload.name;
+    // const picture = payload.picture; // 프로필 사진 URL, 필요시 사용
+
+    // 1. DB에서 이메일로 사용자 찾기
+    const findUserSql =
+      "SELECT user_id, username, email FROM users WHERE email = ?";
+    db.query(findUserSql, [email], async (err, results) => {
+      if (err) {
+        console.error("Error finding user by email:", err);
+        return res.status(500).json({ message: "서버 오류가 발생했습니다." });
+      }
+
+      if (results.length > 0) {
+        // 2. 이미 가입된 사용자 (이메일 기준)
+        const existingUser = results[0];
+        console.log("Google Login: Existing user found", existingUser);
+        return res.json({
+          message: "Google 로그인 성공 (기존 사용자)",
+          user: {
+            user_id: existingUser.user_id,
+            username: existingUser.username,
+            email: existingUser.email,
+          },
+        });
+      } else {
+        const newUsername = name || email.split("@")[0];
+        const randomPasswordForGoogleUser = Math.random()
+          .toString(36)
+          .slice(-8); // 예시
+        const hashedPassword = await bcrypt.hash(
+          randomPasswordForGoogleUser,
+          10
+        ); // 임의 값 해싱
+
+        const registerSql =
+          "INSERT INTO users (username, password, email) VALUES (?, ?, ?)";
+        db.query(
+          registerSql,
+          [newUsername, hashedPassword, email],
+          (regErr, regResult) => {
+            if (regErr) {
+              console.error("Error registering new Google user:", regErr);
+              return res.status(500).json({
+                message: "Google 사용자 등록 중 오류가 발생했습니다.",
+              });
+            }
+            console.log("Google Login: New user registered", {
+              id: regResult.insertId,
+              username: newUsername,
+              email,
+            });
+            res.status(201).json({
+              message: "Google 로그인 및 신규 가입 성공",
+              user: {
+                // 프론트엔드 localStorage에 저장될 형식과 맞추세요
+                user_id: regResult.insertId,
+                username: newUsername,
+                email: email,
+              },
+            });
+          }
+        );
+      }
+    });
+  } catch (error) {
+    console.error("Error verifying Google ID token:", error);
+    res
+      .status(401)
+      .json({ message: "Google 인증에 실패했습니다.", details: error.message });
+  }
 });
 
 // 특정 사용자 정보 조회 (READ)
@@ -132,9 +233,7 @@ app.get("/api/users/:id", (req, res) => {
 app.post("/api/projects", async (req, res) => {
   const { name, content, created_by } = req.body;
   if (!name || !created_by) {
-    return res
-      .status(400)
-      .json({ error: "프로젝트 이름을 입력 해주세요." });
+    return res.status(400).json({ error: "프로젝트 이름을 입력 해주세요." });
   }
 
   const connection = await db.promise().getConnection();
@@ -157,18 +256,22 @@ app.post("/api/projects", async (req, res) => {
     await connection.query(memberSql, [projectId, created_by, "manager"]);
 
     // 3. 활동 로그 기록
-    await logActivity(connection, created_by, projectId, null, "PROJECT_CREATED", {
-      projectName: name,
-    });
-
+    await logActivity(
+      connection,
+      created_by,
+      projectId,
+      null,
+      "PROJECT_CREATED",
+      {
+        projectName: name,
+      }
+    );
 
     await connection.commit();
-    res
-      .status(201)
-      .json({
-        message: "프로젝트가 성공적으로 생성되었습니다.",
-        id: projectId,
-      });
+    res.status(201).json({
+      message: "프로젝트가 성공적으로 생성되었습니다.",
+      id: projectId,
+    });
   } catch (err) {
     await connection.rollback();
     console.error("Error creating project:", err);
@@ -278,7 +381,8 @@ app.put("/api/projects/:id", (req, res) => {
 });
 
 // 2.5. 프로젝트 삭제 (DELETE)
-app.delete("/api/projects/:id", async (req, res) => { // async 키워드 추가
+app.delete("/api/projects/:id", async (req, res) => {
+  // async 키워드 추가
   const { id } = req.params; // 삭제할 프로젝트 ID
   // 요청 본문에서 userId를 가져옵니다. (프론트엔드에서 data: { userId: user.user_id } 로 보냈을 경우)
   const { userId } = req.body;
@@ -306,9 +410,12 @@ app.delete("/api/projects/:id", async (req, res) => { // async 키워드 추가
     const projectOwnerId = projectRows[0].created_by;
 
     // 3. 요청을 보낸 사용자가 프로젝트의 owner인지 확인
-    if (projectOwnerId !== parseInt(userId)) { // userId는 문자열일 수 있으므로 parseInt
+    if (projectOwnerId !== parseInt(userId)) {
+      // userId는 문자열일 수 있으므로 parseInt
       await connection.rollback();
-      return res.status(403).json({ error: "프로젝트 소유자만 삭제할 수 있습니다." });
+      return res
+        .status(403)
+        .json({ error: "프로젝트 소유자만 삭제할 수 있습니다." });
     }
 
     // 4. 소유자가 맞다면 프로젝트 삭제 진행
@@ -319,7 +426,9 @@ app.delete("/api/projects/:id", async (req, res) => { // async 키워드 추가
 
     if (deleteResult.affectedRows === 0) {
       await connection.rollback();
-      return res.status(404).json({ message: "프로젝트를 찾을 수 없거나 이미 삭제되었습니다." });
+      return res
+        .status(404)
+        .json({ message: "프로젝트를 찾을 수 없거나 이미 삭제되었습니다." });
     }
 
     // 5. 활동 로그 기록 (선택 사항: 삭제 시에도 로그 남기기)
@@ -332,7 +441,6 @@ app.delete("/api/projects/:id", async (req, res) => { // async 키워드 추가
 
     await connection.commit();
     res.json({ message: "프로젝트가 성공적으로 삭제되었습니다." });
-
   } catch (err) {
     await connection.rollback();
     console.error("Error deleting project:", err);
@@ -366,7 +474,7 @@ app.get("/api/tasks/due_date", (req, res) => {
       AND t.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
     ORDER BY t.due_date ASC;
   `;
-  
+
   db.query(sql, [userId], (err, results) => {
     if (err) {
       console.error("Error fetching tasks due soon:", err);
@@ -378,47 +486,52 @@ app.get("/api/tasks/due_date", (req, res) => {
   });
 });
 
-
-const nodemailer = require('nodemailer');
-const crypto = require('crypto'); // Node.js 내장 모듈
-
+const nodemailer = require("nodemailer");
+const crypto = require("crypto"); // Node.js 내장 모듈
 
 // --- 4. 비밀번호 재설정 API ---
 
 // --- 4.1. 비밀번호 재설정 요청 처리 API ---
-app.post('/api/forgot-password', async (req, res) => {
+app.post("/api/forgot-password", async (req, res) => {
   const { email } = req.body;
 
   try {
     // 1. 이메일로 사용자 찾기
-    const [users] = await db.promise().query('SELECT * FROM users WHERE email = ?', [email]);
-    
+    const [users] = await db
+      .promise()
+      .query("SELECT * FROM users WHERE email = ?", [email]);
+
     if (users.length === 0) {
       // 보안을 위해, 이메일이 존재하지 않아도 성공한 것처럼 응답합니다.
       // (악의적인 사용자가 어떤 이메일이 가입되어 있는지 추측하는 것을 막기 위함)
-      return res.json({ message: '비밀번호 재설정 이메일을 보냈습니다. 받은 편지함을 확인해주세요.' });
+      return res.json({
+        message:
+          "비밀번호 재설정 이메일을 보냈습니다. 받은 편지함을 확인해주세요.",
+      });
     }
     const user = users[0];
 
     // 2. 보안 토큰 생성
-    const token = crypto.randomBytes(20).toString('hex');
+    const token = crypto.randomBytes(20).toString("hex");
 
     // 3. 토큰 만료 시간 설정 (예: 1시간 후)
     const expires = new Date(Date.now() + 3600000); // 1시간 = 3600 * 1000 ms
 
     // 4. DB에 토큰과 만료 시간 저장
-    await db.promise().query(
-      'UPDATE users SET password_reset_token = ?, password_reset_expires = ? WHERE user_id = ?',
-      [token, expires, user.user_id]
-    );
+    await db
+      .promise()
+      .query(
+        "UPDATE users SET password_reset_token = ?, password_reset_expires = ? WHERE user_id = ?",
+        [token, expires, user.user_id]
+      );
 
     // 5. 이메일 발송 설정 (Nodemailer)
     const transporter = nodemailer.createTransport({
-      service: 'gmail', // 예: Gmail. 실제 서비스에서는 SendGrid, Mailgun 등 추천
+      service: "gmail", // 예: Gmail. 실제 서비스에서는 SendGrid, Mailgun 등 추천
       auth: {
         user: process.env.GMAIL_ADDRESS, // 실제 이메일 주소
-        pass: process.env.GMAIL_PASSWORD      // Gmail 앱 비밀번호 (보안 설정 필요)
-      }
+        pass: process.env.GMAIL_PASSWORD, // Gmail 앱 비밀번호 (보안 설정 필요)
+      },
     });
 
     const resetURL = `http://localhost:3000/reset-password/${token}`; // 프론트엔드 주소
@@ -426,36 +539,41 @@ app.post('/api/forgot-password', async (req, res) => {
     const mailOptions = {
       to: user.email,
       from: process.env.GMAIL_ADDRESS,
-      subject: '비밀번호 재설정 요청',
-      text: `비밀번호를 재설정하려면 다음 링크를 클릭하세요:\n\n${resetURL}\n\n이 링크는 1시간 동안 유효합니다.`
+      subject: "비밀번호 재설정 요청",
+      text: `비밀번호를 재설정하려면 다음 링크를 클릭하세요:\n\n${resetURL}\n\n이 링크는 1시간 동안 유효합니다.`,
     };
 
     // 6. 이메일 발송
     await transporter.sendMail(mailOptions);
 
-    res.json({ message: '비밀번호 재설정 이메일을 보냈습니다. 받은 편지함을 확인해주세요.' });
-
+    res.json({
+      message:
+        "비밀번호 재설정 이메일을 보냈습니다. 받은 편지함을 확인해주세요.",
+    });
   } catch (err) {
-    console.error('비밀번호 재설정 요청 처리 중 오류:', err);
-    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+    console.error("비밀번호 재설정 요청 처리 중 오류:", err);
+    res.status(500).json({ error: "서버 오류가 발생했습니다." });
   }
 });
 
-
 // --- 4.2. 새 비밀번호로 업데이트하는 API ---
-app.post('/api/reset-password/:token', async (req, res) => {
+app.post("/api/reset-password/:token", async (req, res) => {
   const { token } = req.params;
   const { password } = req.body;
 
   try {
     // 1. 토큰으로 사용자 찾기 (만료 시간도 확인)
-    const [users] = await db.promise().query(
-      'SELECT * FROM users WHERE password_reset_token = ? AND password_reset_expires > NOW()',
-      [token]
-    );
+    const [users] = await db
+      .promise()
+      .query(
+        "SELECT * FROM users WHERE password_reset_token = ? AND password_reset_expires > NOW()",
+        [token]
+      );
 
     if (users.length === 0) {
-      return res.status(400).json({ error: '비밀번호 재설정 토큰이 유효하지 않거나 만료되었습니다.' });
+      return res.status(400).json({
+        error: "비밀번호 재설정 토큰이 유효하지 않거나 만료되었습니다.",
+      });
     }
     const user = users[0];
 
@@ -463,19 +581,19 @@ app.post('/api/reset-password/:token', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // 3. DB 업데이트 (비밀번호 변경 및 토큰 정보 삭제)
-    await db.promise().query(
-      'UPDATE users SET password = ?, password_reset_token = NULL, password_reset_expires = NULL WHERE user_id = ?',
-      [hashedPassword, user.user_id]
-    );
+    await db
+      .promise()
+      .query(
+        "UPDATE users SET password = ?, password_reset_token = NULL, password_reset_expires = NULL WHERE user_id = ?",
+        [hashedPassword, user.user_id]
+      );
 
-    res.json({ message: '비밀번호가 성공적으로 변경되었습니다.' });
-
+    res.json({ message: "비밀번호가 성공적으로 변경되었습니다." });
   } catch (err) {
-    console.error('비밀번호 변경 중 오류:', err);
-    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+    console.error("비밀번호 변경 중 오류:", err);
+    res.status(500).json({ error: "서버 오류가 발생했습니다." });
   }
 });
-
 
 // --- 5. 업무 API (Tasks) ---
 
@@ -490,7 +608,7 @@ app.get("/api/projects/:projectId/tasks", (req, res) => {
         GROUP BY t.task_id
         ORDER BY t.created_at DESC;
     `;
-    
+
   db.query(sql, [projectId], (err, results) => {
     if (err) {
       console.error(`Error fetching tasks for project ${projectId}:`, err);
@@ -610,12 +728,13 @@ app.get("/api/tasks/:taskId", async (req, res) => {
     // 5. 쿼리 결과 확인 및 클라이언트에게 응답 전송
     if (rows.length === 0) {
       // 해당 ID의 업무를 찾지 못했을 경우
-      return res.status(404).json({ message: "해당 ID의 업무를 찾을 수 없습니다." });
+      return res
+        .status(404)
+        .json({ message: "해당 ID의 업무를 찾을 수 없습니다." });
     }
-    
+
     // 6. 성공적으로 조회된 업무 정보를 JSON 형태로 전송합니다.
     res.status(200).json(rows[0]);
-
   } catch (err) {
     // 7. 데이터베이스 작업 중 에러 발생 시 처리
     console.error("업무 상세 정보 조회 중 에러 발생:", err);
@@ -679,11 +798,18 @@ app.delete("/api/tasks/:id", (req, res) => {
   db.query(authSql, [taskId, userId], (authErr, authResults) => {
     if (authErr) {
       console.error("Error checking authorization:", authErr);
-      return res.status(500).json({ error: "권한 확인 중 오류가 발생했습니다." });
+      return res
+        .status(500)
+        .json({ error: "권한 확인 중 오류가 발생했습니다." });
     }
 
-    if (authResults.length === 0 || authResults[0].role_in_project !== 'manager') {
-      return res.status(403).json({ error: "업무를 삭제할 권한이 없습니다. (관리자 전용)" });
+    if (
+      authResults.length === 0 ||
+      authResults[0].role_in_project !== "manager"
+    ) {
+      return res
+        .status(403)
+        .json({ error: "업무를 삭제할 권한이 없습니다. (관리자 전용)" });
     }
 
     // 2. [삭제 실행] 권한이 확인되면, 실제 업무를 삭제
@@ -691,11 +817,15 @@ app.delete("/api/tasks/:id", (req, res) => {
     db.query(deleteSql, [taskId], (deleteErr, deleteResult) => {
       if (deleteErr) {
         console.error("Error deleting task:", deleteErr);
-        return res.status(500).json({ error: "업무 삭제 중 오류가 발생했습니다." });
+        return res
+          .status(500)
+          .json({ error: "업무 삭제 중 오류가 발생했습니다." });
       }
 
       if (deleteResult.affectedRows === 0) {
-        return res.status(404).json({ message: "해당 업무를 찾을 수 없습니다." });
+        return res
+          .status(404)
+          .json({ message: "해당 업무를 찾을 수 없습니다." });
       }
 
       // TODO: 활동 로그 기록
@@ -790,18 +920,25 @@ app.get("/api/profile", (req, res) => {
 app.get("/api/activity_logs", async (req, res) => {
   const { projectId } = req.query;
   if (!projectId) {
-    return res.status(400).json({ error: "projectId 쿼리 파라미터가 필요합니다." });
+    return res
+      .status(400)
+      .json({ error: "projectId 쿼리 파라미터가 필요합니다." });
   }
 
   try {
     const [rows] = await db
       .promise()
-      .query("SELECT * FROM activity_logs WHERE project_id = ? ORDER BY created_at DESC", [projectId]);
+      .query(
+        "SELECT * FROM activity_logs WHERE project_id = ? ORDER BY created_at DESC",
+        [projectId]
+      );
 
     res.json(rows);
   } catch (error) {
     console.error("활동 로그 조회 오류:", error);
-    res.status(500).json({ error: "활동 로그를 불러오는 중 오류가 발생했습니다." });
+    res
+      .status(500)
+      .json({ error: "활동 로그를 불러오는 중 오류가 발생했습니다." });
   }
 });
 
