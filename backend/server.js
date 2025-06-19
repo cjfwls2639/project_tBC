@@ -28,7 +28,7 @@ const logActivity = async (
   const sql =
     "INSERT INTO activity_logs (user_id, project_id, task_id, action_type, details) VALUES (?, ?, ?, ?, ?)";
   try {
-    await connection.execute(sql, [
+    await connection.query(sql, [
       userId,
       projectId,
       taskId,
@@ -430,14 +430,6 @@ app.delete("/api/projects/:id", async (req, res) => {
         .status(404)
         .json({ message: "프로젝트를 찾을 수 없거나 이미 삭제되었습니다." });
     }
-
-    // 5. 활동 로그 기록 (선택 사항: 삭제 시에도 로그 남기기)
-    // 프로젝트 이름 등을 알기 위해 다시 조회하는 로직을 추가하거나,
-    // projectRows[0]에서 project_name을 가져올 수 있다면 활용
-    await logActivity(userId, id, null, "PROJECT_DELETED", {
-      projectId: id,
-      // projectName: projectRows[0].project_name // 만약 위 쿼리에서 project_name도 가져왔다면
-    });
 
     await connection.commit();
     res.json({ message: "프로젝트가 성공적으로 삭제되었습니다." });
