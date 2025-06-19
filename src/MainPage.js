@@ -102,7 +102,9 @@ const ProjectModal = ({ isOpen, onClose, onSubmit }) => {
 
 // 프로젝트 수정 모달
 const EditProjectModal = ({ isOpen, onClose, onSubmit, initialData }) => {
-  const [projectName, setProjectName] = useState(initialData?.project_name || "");
+  const [projectName, setProjectName] = useState(
+    initialData?.project_name || ""
+  );
   const [dDay, setDDay] = useState(initialData?.end_date || "");
   const [content, setContent] = useState(initialData?.content || "");
 
@@ -153,7 +155,11 @@ const EditProjectModal = ({ isOpen, onClose, onSubmit, initialData }) => {
             />
           </div>
           <div className="modal-buttons">
-            <button type="button" onClick={onClose} className="modal-cancel-btn">
+            <button
+              type="button"
+              onClick={onClose}
+              className="modal-cancel-btn"
+            >
               취소
             </button>
             <button type="submit" className="modal-submit-btn">
@@ -309,37 +315,39 @@ const MainPage = () => {
   const [isLoadingCommentsTask, setIsLoadingCommentsTask] = useState({});
   const [taskCommentCounts, setTaskCommentCounts] = useState({});
 
-// 프로젝트 수정 모달 열기
-const openEditModal = (project) => {
-  setEditingProject(project); // 선택한 프로젝트 정보 저장
-  setIsEditModalOpen(true);   // 수정 모달 열기
-};
+  // 프로젝트 수정 모달 열기
+  const openEditModal = (project) => {
+    setEditingProject(project); // 선택한 프로젝트 정보 저장
+    setIsEditModalOpen(true); // 수정 모달 열기
+  };
 
-// 프로젝트 수정 모달 닫기
-const closeEditModal = () => {
-  setIsEditModalOpen(false);
-  setEditingProject(null);    // 편집 상태 초기화
-};
+  // 프로젝트 수정 모달 닫기
+  const closeEditModal = () => {
+    setIsEditModalOpen(false);
+    setEditingProject(null); // 편집 상태 초기화
+  };
 
-// 프로젝트 수정 핸들
-const handleEditProject = async (projectData) => {
-  if (!editingProject || !editingProject.project_id) return;
+  // 프로젝트 수정 핸들
+  const handleEditProject = async (projectData) => {
+    if (!editingProject || !editingProject.project_id) return;
 
-  try {
-    const response = await axios.put(`/api/projects/${editingProject.project_id}`, {
-      name: projectData.name,
-      content: projectData.content,
-      end_date: projectData.end_date,
-    });
-    alert(response.data.message);
-    await fetchProjects();
-    closeEditModal();
-  } catch (err) {
-    console.error("프로젝트 수정 실패:", err);
-    alert("프로젝트 수정 중 오류가 발생했습니다.");
-  }
-};
-
+    try {
+      const response = await axios.put(
+        `/api/projects/${editingProject.project_id}`,
+        {
+          name: projectData.name,
+          content: projectData.content,
+          end_date: projectData.end_date,
+        }
+      );
+      alert(response.data.message);
+      await fetchProjects();
+      closeEditModal();
+    } catch (err) {
+      console.error("프로젝트 수정 실패:", err);
+      alert("프로젝트 수정 중 오류가 발생했습니다.");
+    }
+  };
 
   const formatDate = (dateString) => {
     if (!dateString) return "없음";
@@ -488,22 +496,9 @@ const handleEditProject = async (projectData) => {
     } else {
       navigate("/login"); // 없으면 로그인 페이지로
     }
-  }, [navigate, fetchAlarms, fetchProjects]); // 의존성 배열 유지
+  }, [navigate, fetchAlarms, fetchProjects]);
 
   useEffect(() => {
-    if (
-      selectedProjectId &&
-      selectedTab === "업무" &&
-      tasks &&
-      tasks.length > 0
-    ) {
-      console.log("업무 탭 활성화, 댓글 수 로딩 시작...");
-      tasks.forEach((task) => {
-        if (task.task_id && taskCommentCounts[task.task_id] === undefined) {
-          fetchAndSetCommentCount(task.task_id);
-        }
-      });
-    }
     if (selectedProjectId) {
       if (selectedTab === "업무") {
         fetchTasksByProjectId(selectedProjectId);
@@ -532,6 +527,28 @@ const handleEditProject = async (projectData) => {
   ]);
 
   useEffect(() => {
+    if (
+      selectedProjectId &&
+      selectedTab === "업무" &&
+      tasks &&
+      tasks.length > 0
+    ) {
+      console.log("업무 탭 활성화, 댓글 수 로딩 시작...");
+      tasks.forEach((task) => {
+        if (task.task_id && taskCommentCounts[task.task_id] === undefined) {
+          fetchAndSetCommentCount(task.task_id);
+        }
+      });
+    }
+  }, [
+    selectedProjectId,
+    selectedTab,
+    tasks,
+    fetchAndSetCommentCount,
+    taskCommentCounts,
+  ]);
+
+  useEffect(() => {
     setOpenTaskCommentsId(null);
     setTaskComments({});
     setSelectedTab("메인");
@@ -553,11 +570,10 @@ const handleEditProject = async (projectData) => {
         name: projectData.name,
         content: projectData.content,
         end_date: projectData.end_date,
-        created_by: user.user_id, // API 명세에 따라 'created_by' 또는 'userId' 등 사용
+        created_by: user.user_id,
       });
       alert(response.data.message || "프로젝트가 성공적으로 생성되었습니다.");
-      await fetchProjects(); // 프로젝트 목록 새로고침
-      // closeModal(); // ProjectModal 컴포넌트 내부에서 호출하도록 변경함 (성공 시 폼 초기화와 함께)
+      await fetchProjects();
     } catch (error) {
       console.error("프로젝트 생성 실패:", error);
       alert(
@@ -1182,11 +1198,11 @@ const handleEditProject = async (projectData) => {
                                           className="comments-btn"
                                         >
                                           댓글{" "}
-                                          {taskComments[task.task_id]?.length >
-                                          0
+                                          {taskCommentCounts[task.task_id] !==
+                                            undefined &&
+                                          taskCommentCounts[task.task_id] > 0
                                             ? `(${
-                                                taskComments[task.task_id]
-                                                  .length
+                                                taskCommentCounts[task.task_id]
                                               })`
                                             : ""}
                                         </button>
