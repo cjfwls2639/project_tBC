@@ -18,7 +18,8 @@ const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 // 활동 로그 기록 함수
 const logActivity = async (
-  userId, // 첫 번째 매개변수에서 connection 제거
+  connection,
+  userId,
   projectId,
   taskId,
   actionType,
@@ -28,15 +29,13 @@ const logActivity = async (
     "INSERT INTO activity_logs (user_id, project_id, task_id, action_type, details) VALUES (?, ?, ?, ?, ?)";
   try {
     // 항상 db 풀을 사용하여 promise 기반으로 쿼리 실행
-    await db
-      .promise()
-      .query(sql, [
-        userId,
-        projectId,
-        taskId,
-        actionType,
-        JSON.stringify(details),
-      ]);
+    await connection.query(sql, [
+      userId,
+      projectId,
+      taskId,
+      actionType,
+      JSON.stringify(details),
+    ]);
     console.log(`Activity logged: ${actionType}`);
   } catch (err) {
     console.error("Error logging activity:", err);
@@ -841,11 +840,9 @@ app.delete("/api/tasks/:id", (req, res) => {
   db.getConnection((err, connection) => {
     if (err) {
       console.error("Error getting database connection:", err);
-      return res
-        .status(500)
-        .json({
-          error: "데이터베이스 연결을 가져오는 중 오류가 발생했습니다.",
-        });
+      return res.status(500).json({
+        error: "데이터베이스 연결을 가져오는 중 오류가 발생했습니다.",
+      });
     }
 
     // 1. [권한 검사]
@@ -899,12 +896,10 @@ app.delete("/api/tasks/:id", (req, res) => {
                 return connection.rollback(() => {
                   connection.release(); // 사용한 연결 반환
                   console.error("Error deleting task assignees:", assigneesErr);
-                  res
-                    .status(500)
-                    .json({
-                      error: "업무 담당자 정보 삭제 중 오류가 발생했습니다.",
-                      details: assigneesErr.message,
-                    });
+                  res.status(500).json({
+                    error: "업무 담당자 정보 삭제 중 오류가 발생했습니다.",
+                    details: assigneesErr.message,
+                  });
                 });
               }
 
@@ -918,12 +913,10 @@ app.delete("/api/tasks/:id", (req, res) => {
                     return connection.rollback(() => {
                       connection.release(); // 사용한 연결 반환
                       console.error("Error deleting task:", taskErr);
-                      res
-                        .status(500)
-                        .json({
-                          error: "업무 삭제 중 오류가 발생했습니다.",
-                          details: taskErr.message,
-                        });
+                      res.status(500).json({
+                        error: "업무 삭제 중 오류가 발생했습니다.",
+                        details: taskErr.message,
+                      });
                     });
                   }
 
@@ -945,11 +938,9 @@ app.delete("/api/tasks/:id", (req, res) => {
                           "Error committing transaction:",
                           commitErr
                         );
-                        res
-                          .status(500)
-                          .json({
-                            error: "트랜잭션 커밋 중 오류가 발생했습니다.",
-                          });
+                        res.status(500).json({
+                          error: "트랜잭션 커밋 중 오류가 발생했습니다.",
+                        });
                       });
                     }
                     connection.release(); // 사용한 연결 반환
