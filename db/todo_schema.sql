@@ -19,6 +19,7 @@ CREATE TABLE projects (
     content VARCHAR(255),
     created_by INT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    end_date DATE,
     FOREIGN KEY (created_by) REFERENCES users(user_id)
 );
 

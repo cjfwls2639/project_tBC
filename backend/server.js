@@ -231,7 +231,7 @@ app.get("/api/users/:id", (req, res) => {
 
 // 2.1. 새로운 프로젝트 생성 (CREATE)
 app.post("/api/projects", async (req, res) => {
-  const { name, content, created_by } = req.body;
+  const { name, content, end_date, created_by } = req.body;
   if (!name || !created_by) {
     return res.status(400).json({ error: "프로젝트 이름을 입력 해주세요." });
   }
@@ -242,10 +242,11 @@ app.post("/api/projects", async (req, res) => {
 
     // 1. projects 테이블에 프로젝트 생성
     const projectSql =
-      "INSERT INTO projects (project_name, content, created_by) VALUES (?, ?, ?)";
+      "INSERT INTO projects (project_name, content, end_date, created_by) VALUES (?, ?, ?, ?)";
     const [projectResult] = await connection.query(projectSql, [
       name,
       content,
+      end_date,
       created_by,
     ]);
     const projectId = projectResult.insertId;

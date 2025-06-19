@@ -6,17 +6,20 @@ import "./styles/Sidebar.css";
 import "./styles/NavigationBar.css";
 import "./styles/MainContent.css";
 
+
+//const formatDate = (dateString) => {
+  //if (!dateString) return "없음";
+  //const date = new Date(dateString);
+  //return isNaN(date) ? "없음" : date.toLocaleDateString("ko-KR");
+//};
+
 const calculateDDay = (endDate) => {
   if (!endDate) return "없음";
-  const today = new Date();
   const target = new Date(endDate);
+  if (isNaN(target)) return "없음";
+  const today = new Date();
   const diff = Math.ceil((target - today) / (1000 * 60 * 60 * 24));
   return diff > 0 ? `D-${diff}` : diff === 0 ? "D-DAY" : `D+${Math.abs(diff)}`;
-};
-
-const formatDate = (dateString) => {
-  if (!dateString) return "없음";
-  return new Date(dateString).toLocaleDateString("ko-KR");
 };
 
 const ProjectModal = ({ isOpen, onClose, onSubmit }) => {
@@ -29,7 +32,7 @@ const ProjectModal = ({ isOpen, onClose, onSubmit }) => {
     if (projectName.trim()) {
       onSubmit({
         name: projectName,
-        dDay: dDay,
+        end_date: dDay,
         content: content,
       });
       onClose();
@@ -87,23 +90,6 @@ const ProjectModal = ({ isOpen, onClose, onSubmit }) => {
     </div>
   );
 };
-
-//d-day 계산 함수
-// const calculateDday = (dateString) => {
-//   if (!dateString) return "미설정";
-
-//   const targetDate = new Date(dateString);
-//   const today = new Date();
-//   const diff = Math.ceil((targetDate - today) / (1000 * 60 * 60 * 24));
-
-//   if (diff > 0) {
-//     return `D-${diff}`;
-//   } else if (diff === 0) {
-//     return "D-Day";
-//   } else {
-//     return `D+${Math.abs(diff)}`;
-//   }
-// };
 
 const MainPage = () => {
   const navigate = useNavigate();
@@ -208,6 +194,7 @@ const MainPage = () => {
       const response = await axios.post("/api/projects", {
         name: projectData.name,
         content: projectData.content,
+        end_date: projectData.end_date, 
         created_by: user.user_id,
       });
       alert(response.data.message);
@@ -481,8 +468,10 @@ useEffect(() => {
                     <div>
                       <h2>메인 현황</h2>
                       <p><strong>프로젝트 이름:</strong> {selectedProject.project_name}</p>
-                      <p><strong>종료일:</strong> {formatDate(selectedProject.end_date)}</p>
-                      <p><strong>D-Day:</strong> {calculateDDay(selectedProject.end_date)}</p>
+                      <p>
+                      <strong>종료일:</strong> {formatDate(selectedProject.end_date)}{" "}
+                      <strong style={{ color: "red" }}>({calculateDDay(selectedProject.end_date)})</strong>
+                      </p>
                       <p><strong>프로젝트 설명:</strong> {selectedProject.content || "설명이 없습니다."}</p>
                       <p><strong>달성률:</strong> {selectedProject.progress || 0}%</p>
                     </div>
