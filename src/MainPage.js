@@ -479,10 +479,10 @@ useEffect(() => {
                             style={{ width: `${50}%` }}
                           ></div>
                         </div>
-                    </div>
+                        <p><strong>프로젝트 이름:</strong> {selectedProject.project_name}</p>
+                        <p><strong>프로젝트 설명:</strong> {selectedProject.content || "설명이 없습니다."}</p>
+                        </div>
                     )}
-                    <p><strong>프로젝트 이름:</strong> {selectedProject.project_name}</p>
-                    <p><strong>프로젝트 설명:</strong> {selectedProject.content || "설명이 없습니다."}</p>
 
                   {/* 메인 화면에서 업무 버튼을 누를 시 뜨는 화면 */}
                   {selectedTab === "업무" && (
