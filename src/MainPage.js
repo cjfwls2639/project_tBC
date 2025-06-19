@@ -505,7 +505,7 @@ const MainPage = () => {
     // 요청 body: title, description (content), status, due_date, assigned_to_user_id
     const apiTaskData = {
       title: taskFormData.title,
-      description: taskFormData.description, // 백엔드는 'content'로 받을 수 있음. API 확인.
+      content: taskFormData.description, // 백엔드는 'content'로 받을 수 있음. API 확인.
       status: taskFormData.status,
       due_date: taskFormData.due_date || null,
       created_by_user_id: user.user_id,

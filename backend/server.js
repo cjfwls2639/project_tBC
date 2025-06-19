@@ -821,7 +821,8 @@ app.put("/api/tasks/:taskId", (req, res) => {
     }
   );
 });
-// 5.5. 업무 삭제 (DELETE) - 관리자 권한 확인 로직 추가
+
+// 5.5. 업무 삭제 (DELETE) - 관리자 권한 확인 및 참조 데이터 삭제 로직 추가
 app.delete("/api/tasks/:id", (req, res) => {
   // TODO: 실제 프로젝트에서는 JWT 인증 미들웨어를 통해 사용자 ID를 가져와야 합니다.
   const { userId } = req.body; // 테스트를 위해 요청 body에서 사용자 ID를 받는다고 가정
@@ -831,50 +832,139 @@ app.delete("/api/tasks/:id", (req, res) => {
     return res.status(401).json({ error: "인증되지 않은 사용자입니다." });
   }
 
-  // 1. [권한 검사] 먼저 사용자가 해당 업무의 프로젝트에서 'manager' 역할을 가졌는지 확인
-  const authSql = `
-    SELECT pm.role_in_project
-    FROM tasks AS t
-    JOIN project_members AS pm ON t.project_id = pm.project_id
-    WHERE t.task_id = ? AND pm.user_id = ?;
-  `;
-
-  db.query(authSql, [taskId, userId], (authErr, authResults) => {
-    if (authErr) {
-      console.error("Error checking authorization:", authErr);
+  // taskId가 유효한 숫자인지 확인
+  const numericTaskId = parseInt(taskId, 10);
+  if (isNaN(numericTaskId)) {
+    return res.status(400).json({ error: "잘못된 업무 ID 형식입니다." });
+  }
+  // 데이터베이스 풀에서 연결 가져오기
+  db.getConnection((err, connection) => {
+    if (err) {
+      console.error("Error getting database connection:", err);
       return res
         .status(500)
-        .json({ error: "권한 확인 중 오류가 발생했습니다." });
+        .json({
+          error: "데이터베이스 연결을 가져오는 중 오류가 발생했습니다.",
+        });
     }
 
-    if (
-      authResults.length === 0 ||
-      authResults[0].role_in_project !== "manager"
-    ) {
-      return res
-        .status(403)
-        .json({ error: "업무를 삭제할 권한이 없습니다. (관리자 전용)" });
-    }
+    // 1. [권한 검사]
+    const authSql = `
+      SELECT pm.role_in_project
+      FROM tasks AS t
+      JOIN project_members AS pm ON t.project_id = pm.project_id
+      WHERE t.task_id = ? AND pm.user_id = ?;
+    `;
 
-    // 2. [삭제 실행] 권한이 확인되면, 실제 업무를 삭제
-    const deleteSql = "DELETE FROM tasks WHERE task_id = ?";
-    db.query(deleteSql, [taskId], (deleteErr, deleteResult) => {
-      if (deleteErr) {
-        console.error("Error deleting task:", deleteErr);
-        return res
-          .status(500)
-          .json({ error: "업무 삭제 중 오류가 발생했습니다." });
+    connection.query(
+      authSql,
+      [numericTaskId, userId],
+      (authErr, authResults) => {
+        if (authErr) {
+          connection.release(); // 사용한 연결 반환
+          console.error("Error checking authorization:", authErr);
+          return res
+            .status(500)
+            .json({ error: "권한 확인 중 오류가 발생했습니다." });
+        }
+
+        if (
+          authResults.length === 0 ||
+          authResults[0].role_in_project !== "manager"
+        ) {
+          connection.release(); // 사용한 연결 반환
+          return res
+            .status(403)
+            .json({ error: "업무를 삭제할 권한이 없습니다. (관리자 전용)" });
+        }
+
+        // 2. [삭제 실행] 권한이 확인되면, 트랜잭션 시작 (가져온 connection 객체 사용)
+        connection.beginTransaction((transactionErr) => {
+          if (transactionErr) {
+            connection.release(); // 사용한 연결 반환
+            console.error("Error starting transaction:", transactionErr);
+            return res
+              .status(500)
+              .json({ error: "트랜잭션 시작 중 오류가 발생했습니다." });
+          }
+
+          // 2.1. task_assignees 테이블에서 관련 데이터 삭제
+          const deleteAssigneesSql =
+            "DELETE FROM task_assignees WHERE task_id = ?";
+          connection.query(
+            deleteAssigneesSql,
+            [numericTaskId],
+            (assigneesErr, assigneesResult) => {
+              if (assigneesErr) {
+                return connection.rollback(() => {
+                  connection.release(); // 사용한 연결 반환
+                  console.error("Error deleting task assignees:", assigneesErr);
+                  res
+                    .status(500)
+                    .json({
+                      error: "업무 담당자 정보 삭제 중 오류가 발생했습니다.",
+                      details: assigneesErr.message,
+                    });
+                });
+              }
+
+              // 2.2. tasks 테이블에서 업무 데이터 삭제
+              const deleteTaskSql = "DELETE FROM tasks WHERE task_id = ?";
+              connection.query(
+                deleteTaskSql,
+                [numericTaskId],
+                (taskErr, taskResult) => {
+                  if (taskErr) {
+                    return connection.rollback(() => {
+                      connection.release(); // 사용한 연결 반환
+                      console.error("Error deleting task:", taskErr);
+                      res
+                        .status(500)
+                        .json({
+                          error: "업무 삭제 중 오류가 발생했습니다.",
+                          details: taskErr.message,
+                        });
+                    });
+                  }
+
+                  if (taskResult.affectedRows === 0) {
+                    return connection.rollback(() => {
+                      connection.release(); // 사용한 연결 반환
+                      res
+                        .status(404)
+                        .json({ message: "삭제할 업무를 찾을 수 없습니다." });
+                    });
+                  }
+
+                  // 모든 삭제 작업이 성공하면 트랜잭션 커밋
+                  connection.commit((commitErr) => {
+                    if (commitErr) {
+                      return connection.rollback(() => {
+                        connection.release(); // 사용한 연결 반환
+                        console.error(
+                          "Error committing transaction:",
+                          commitErr
+                        );
+                        res
+                          .status(500)
+                          .json({
+                            error: "트랜잭션 커밋 중 오류가 발생했습니다.",
+                          });
+                      });
+                    }
+                    connection.release(); // 사용한 연결 반환
+                    res.json({
+                      message:
+                        "업무와 관련 담당자 정보가 성공적으로 삭제되었습니다.",
+                    });
+                  });
+                }
+              );
+            }
+          );
+        });
       }
-
-      if (deleteResult.affectedRows === 0) {
-        return res
-          .status(404)
-          .json({ message: "해당 업무를 찾을 수 없습니다." });
-      }
-
-      // TODO: 활동 로그 기록
-      res.json({ message: "업무가 성공적으로 삭제되었습니다." });
-    });
+    );
   });
 });
 
