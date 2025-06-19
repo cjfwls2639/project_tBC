@@ -8,9 +8,9 @@ CREATE TABLE users (
     username VARCHAR(10) NOT NULL UNIQUE,
     email VARCHAR(30) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     password_reset_token VARCHAR(255) NULL,
-    password_reset_expires DATETIME NULL;
+    password_reset_expires DATETIME NULL
 );
 
 CREATE TABLE projects (
