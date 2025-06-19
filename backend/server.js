@@ -17,7 +17,7 @@ const logActivity = async (connection, userId, projectId, taskId, actionType, de
   const sql =
     "INSERT INTO activity_logs (user_id, project_id, task_id, action_type, details) VALUES (?, ?, ?, ?, ?)";
   try {
-    await connection.query(sql, [
+    await connection.execute(sql, [
       userId,
       projectId,
       taskId,
@@ -303,7 +303,7 @@ app.delete("/api/projects/:id", async (req, res) => { // async 키워드 추가
       return res.status(404).json({ message: "프로젝트를 찾을 수 없습니다." });
     }
 
-    const projectOwnerId = projectRows[0].owner_id;
+    const projectOwnerId = projectRows[0].created_by;
 
     // 3. 요청을 보낸 사용자가 프로젝트의 owner인지 확인
     if (projectOwnerId !== parseInt(userId)) { // userId는 문자열일 수 있으므로 parseInt

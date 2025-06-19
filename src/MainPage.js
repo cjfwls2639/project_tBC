@@ -132,9 +132,9 @@ const MainPage = () => {
         // 이전에 선택한 프로젝트가 있다면 유지, 없다면 첫번째 프로젝트 선택
         if (
           !selectedProjectId ||
-          !response.data.find((p) => p.id === selectedProjectId)
+          !response.data.find((p) => p.project_id === selectedProjectId)
         ) {
-          setSelectedProjectId(response.data[0].id);
+          setSelectedProjectId(response.data[0].project_id);
         }
       } else {
         setSelectedProjectId(null); // 프로젝트가 없으면 선택 해제
@@ -271,7 +271,7 @@ useEffect(() => {
   const openModal = () => setIsModalOpen(true);
   const closeModal = () => setIsModalOpen(false);
 
-  const selectedProject = projects.find((p) => p.id === selectedProjectId);
+  const selectedProject = projects.find((p) => p.project_id === selectedProjectId);
 
   return (
     <div>
@@ -353,11 +353,11 @@ useEffect(() => {
                 {projects.map((project) => (
                   <li
                     key={project.id}
-                    className={project.id === selectedProjectId ? "active" : ""}
+                    className={project.project_id === selectedProjectId ? "active" : ""}
                   >
                     <button
                       className="sidebar-link"
-                      onClick={() => setSelectedProjectId(project.id)}
+                      onClick={() => setSelectedProjectId(project.project_id)}
                     >
                       {project.project_name}
                     </button>
@@ -435,8 +435,7 @@ useEffect(() => {
                       <ul className="activity-log-list">
                         {activityLogs.map((log) => (
                           <li key={log.id}>
-                            [{new Date(log.created_at).toLocaleString("ko-KR")}] {log.action_type} -{" "}
-                            {log.details}
+                            [{new Date(log.created_at).toLocaleString("ko-KR")}] {log.action_type} - {JSON.stringify(log.details)}
                           </li>
                         ))}
                       </ul>
