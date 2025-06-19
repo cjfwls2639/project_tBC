@@ -18,7 +18,7 @@ const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 // 활동 로그 기록 함수
 const logActivity = async (
-  connection,
+  db_connection,
   userId,
   projectId,
   taskId,
@@ -27,9 +27,10 @@ const logActivity = async (
 ) => {
   const sql =
     "INSERT INTO activity_logs (user_id, project_id, task_id, action_type, details) VALUES (?, ?, ?, ?, ?)";
+  const params = [userId, projectId, actionType, JSON.stringify(details)];
   try {
     // 항상 db 풀을 사용하여 promise 기반으로 쿼리 실행
-    await connection.query(sql, [
+    await db_connection.query(sql, params, [
       userId,
       projectId,
       taskId,
@@ -773,8 +774,8 @@ app.get("/api/tasks/:taskId", async (req, res) => {
 
 // 5.4. 업무 정보 수정 (UPDATE)
 app.put("/api/tasks/:taskId", (req, res) => {
-  const { taskId } = req.params; // URL에서 taskId 추출
-  const { title, content, due_date, status, created_by_user_id } = req.body;
+  const { taskId } = req.params;
+  const { title, content, due_date, status } = req.body;
 
   // DB 컬럼이 숫자형이라면 taskId를 숫자로 변환하는 것이 좋습니다.
   const numericTaskId = parseInt(taskId, 10);
@@ -787,13 +788,12 @@ app.put("/api/tasks/:taskId", (req, res) => {
         task_name = ?, 
         content = ?, 
         due_date = ?, 
-        status = ?, 
-        created_by_user_id = ?
+        status = ?
         WHERE task_id = ?
     `;
   db.query(
     sql,
-    [title, content, due_date, status, created_by_user_id, numericTaskId], // 수정: numericTaskId 사용 (또는 taskId가 이미 숫자라면 taskId 직접 사용)
+    [title, content, due_date, status, numericTaskId],
     (err, result) => {
       if (err) {
         console.error("업무 수정 중 오류 발생:", err);
@@ -823,20 +823,17 @@ app.put("/api/tasks/:taskId", (req, res) => {
 
 // 5.5. 업무 삭제 (DELETE) - 관리자 권한 확인 및 참조 데이터 삭제 로직 추가
 app.delete("/api/tasks/:id", (req, res) => {
-  // TODO: 실제 프로젝트에서는 JWT 인증 미들웨어를 통해 사용자 ID를 가져와야 합니다.
-  const { userId } = req.body; // 테스트를 위해 요청 body에서 사용자 ID를 받는다고 가정
-  const { id: taskId } = req.params; // :id를 taskId로 받음
+  const { userId } = req.body;
+  const { id: taskId } = req.params;
 
   if (!userId) {
     return res.status(401).json({ error: "인증되지 않은 사용자입니다." });
   }
 
-  // taskId가 유효한 숫자인지 확인
   const numericTaskId = parseInt(taskId, 10);
   if (isNaN(numericTaskId)) {
     return res.status(400).json({ error: "잘못된 업무 ID 형식입니다." });
   }
-  // 데이터베이스 풀에서 연결 가져오기
   db.getConnection((err, connection) => {
     if (err) {
       console.error("Error getting database connection:", err);
@@ -903,52 +900,75 @@ app.delete("/api/tasks/:id", (req, res) => {
                 });
               }
 
-              // 2.2. tasks 테이블에서 업무 데이터 삭제
-              const deleteTaskSql = "DELETE FROM tasks WHERE task_id = ?";
+              // 2.2. comments 테이블에서 관련 데이터 삭제 (새로 추가)
+              const deleteCommentsSql =
+                "DELETE FROM comments WHERE task_id = ?";
               connection.query(
-                deleteTaskSql,
+                deleteCommentsSql,
                 [numericTaskId],
-                (taskErr, taskResult) => {
-                  if (taskErr) {
+                (commentsErr, commentsResult) => {
+                  if (commentsErr) {
                     return connection.rollback(() => {
-                      connection.release(); // 사용한 연결 반환
-                      console.error("Error deleting task:", taskErr);
+                      connection.release();
+                      console.error("Error deleting comments:", commentsErr);
                       res.status(500).json({
-                        error: "업무 삭제 중 오류가 발생했습니다.",
-                        details: taskErr.message,
+                        error: "업무 관련 댓글 삭제 중 오류가 발생했습니다.",
+                        details: commentsErr.message,
                       });
                     });
                   }
+                  console.log(
+                    `Deleted ${commentsResult.affectedRows} comments for task ${numericTaskId}`
+                  );
 
-                  if (taskResult.affectedRows === 0) {
-                    return connection.rollback(() => {
-                      connection.release(); // 사용한 연결 반환
-                      res
-                        .status(404)
-                        .json({ message: "삭제할 업무를 찾을 수 없습니다." });
-                    });
-                  }
+                  // 2.3. tasks 테이블에서 업무 데이터 삭제
+                  const deleteTaskSql = "DELETE FROM tasks WHERE task_id = ?";
+                  connection.query(
+                    deleteTaskSql,
+                    [numericTaskId],
+                    (taskErr, taskResult) => {
+                      if (taskErr) {
+                        return connection.rollback(() => {
+                          connection.release(); // 사용한 연결 반환
+                          console.error("Error deleting task:", taskErr);
+                          res.status(500).json({
+                            error: "업무 삭제 중 오류가 발생했습니다.",
+                            details: taskErr.message,
+                          });
+                        });
+                      }
 
-                  // 모든 삭제 작업이 성공하면 트랜잭션 커밋
-                  connection.commit((commitErr) => {
-                    if (commitErr) {
-                      return connection.rollback(() => {
+                      if (taskResult.affectedRows === 0) {
+                        return connection.rollback(() => {
+                          connection.release(); // 사용한 연결 반환
+                          res.status(404).json({
+                            message: "삭제할 업무를 찾을 수 없습니다.",
+                          });
+                        });
+                      }
+
+                      // 모든 삭제 작업이 성공하면 트랜잭션 커밋
+                      connection.commit((commitErr) => {
+                        if (commitErr) {
+                          return connection.rollback(() => {
+                            connection.release(); // 사용한 연결 반환
+                            console.error(
+                              "Error committing transaction:",
+                              commitErr
+                            );
+                            res.status(500).json({
+                              error: "트랜잭션 커밋 중 오류가 발생했습니다.",
+                            });
+                          });
+                        }
                         connection.release(); // 사용한 연결 반환
-                        console.error(
-                          "Error committing transaction:",
-                          commitErr
-                        );
-                        res.status(500).json({
-                          error: "트랜잭션 커밋 중 오류가 발생했습니다.",
+                        res.json({
+                          message:
+                            "업무와 관련 담당자 정보가 성공적으로 삭제되었습니다.",
                         });
                       });
                     }
-                    connection.release(); // 사용한 연결 반환
-                    res.json({
-                      message:
-                        "업무와 관련 담당자 정보가 성공적으로 삭제되었습니다.",
-                    });
-                  });
+                  );
                 }
               );
             }

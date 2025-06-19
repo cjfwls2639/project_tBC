@@ -243,6 +243,7 @@ const MainPage = () => {
   const [openTaskCommentsId, setOpenTaskCommentsId] = useState(null);
   const [taskComments, setTaskComments] = useState({});
   const [isLoadingCommentsTask, setIsLoadingCommentsTask] = useState({});
+  const [taskCommentCounts, setTaskCommentCounts] = useState({});
 
   const formatDate = (dateString) => {
     if (!dateString) return "없음";
@@ -345,7 +346,7 @@ const MainPage = () => {
       setProjectUsers(res.data);
     } catch (err) {
       console.error("프로젝트 사용자 목록 불러오기 실패:", err);
-      setProjectUsers([]); // 실패 시 빈 배열로
+      setProjectUsers([]);
     }
   }, [selectedProjectId]);
 
@@ -359,10 +360,29 @@ const MainPage = () => {
       setAlarmCount(response.data.length);
     } catch (err) {
       console.error("알림을 불러오는 중 오류 발생:", err);
-      // 알림 로딩 실패는 사용자에게 큰 영향을 주지 않을 수 있으므로, 조용히 처리할 수 있음
-      // setError("알림을 불러오는 데 실패했습니다.");
     }
   }, [user]);
+
+  const fetchAndSetCommentCount = useCallback(async (taskId) => {
+    if (!taskId) return;
+
+    setIsLoadingCommentsTask((prev) => ({ ...prev, [taskId]: true }));
+    try {
+      const response = await axios.get(`/api/tasks/${taskId}/comments`);
+      setTaskCommentCounts((prevCounts) => ({
+        ...prevCounts,
+        [taskId]: response.data.length,
+      }));
+    } catch (error) {
+      console.error(`댓글 수 로딩 실패 (Task ID: ${taskId}):`, error);
+      setTaskCommentCounts((prevCounts) => ({
+        ...prevCounts,
+        [taskId]: 0, // 실패 시 0으로 표시
+      }));
+    } finally {
+      setIsLoadingCommentsTask((prev) => ({ ...prev, [taskId]: false }));
+    }
+  }, []);
 
   useEffect(() => {
     const loggedInUser = JSON.parse(localStorage.getItem("user"));
@@ -375,31 +395,38 @@ const MainPage = () => {
   }, [navigate, fetchAlarms, fetchProjects]); // 의존성 배열 유지
 
   useEffect(() => {
+    if (
+      selectedProjectId &&
+      selectedTab === "업무" &&
+      tasks &&
+      tasks.length > 0
+    ) {
+      console.log("업무 탭 활성화, 댓글 수 로딩 시작...");
+      tasks.forEach((task) => {
+        if (task.task_id && taskCommentCounts[task.task_id] === undefined) {
+          fetchAndSetCommentCount(task.task_id);
+        }
+      });
+    }
     if (selectedProjectId) {
-      // 선택된 프로젝트가 있을 때만 데이터 로드
       if (selectedTab === "업무") {
-        // 업무 탭에서는 항상 업무 목록을 다시 불러올 수 있도록 조건 단순화
-        // (예: 생성/수정 후 목록 탭으로 돌아올 때 등)
         fetchTasksByProjectId(selectedProjectId);
       } else if (selectedTab === "로그") {
         fetchActivityLogs(selectedProjectId);
       } else if (selectedTab === "사용자") {
-        fetchProjectUsers(); // 사용자 탭 선택 시 참여자 목록 로드
+        fetchProjectUsers();
       }
 
-      // 탭 변경 시 댓글 창 닫기 (선택 사항: 업무 탭 내에서 서브탭 변경 시에는 유지할 수도 있음)
       if (selectedTab !== "업무") {
         setOpenTaskCommentsId(null);
       }
     } else {
-      // 선택된 프로젝트가 없으면 관련 데이터 초기화
       setTasks([]);
       setActivityLogs([]);
       setProjectUsers([]);
       setOpenTaskCommentsId(null);
-      setTaskComments({}); // 캐시된 댓글도 초기화
+      setTaskComments({});
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     selectedTab,
     selectedProjectId,
@@ -407,14 +434,10 @@ const MainPage = () => {
     fetchActivityLogs,
     fetchProjectUsers,
   ]);
-  // taskSubTab은 fetchTasksByProjectId가 호출되는 조건에 이미 포함되어 있으므로,
-  // 직접적인 의존성으로 추가하지 않아도 될 수 있음 (fetchTasksByProjectId가 subTab 변경 시 호출되도록 설계).
 
-  // 프로젝트 변경 시 댓글 상태 초기화 (더 명시적인 처리)
   useEffect(() => {
     setOpenTaskCommentsId(null);
     setTaskComments({});
-    // 프로젝트 변경 시 기본 탭을 '메인'으로 설정하고, 업무 서브탭은 '목록'으로 초기화
     setSelectedTab("메인");
     setTaskSubTab("목록");
   }, [selectedProjectId]);
@@ -550,10 +573,9 @@ const MainPage = () => {
     }
     const apiTaskData = {
       title: taskFormData.title,
-      content: taskFormData.description, // API 필드명 'content'
+      content: taskFormData.description,
       status: taskFormData.status,
       due_date: taskFormData.due_date || null,
-      // updated_by_user_id: user.user_id, // API에서 필요하다면 추가
     };
     setIsLoadingTasks(true);
     setTaskError(null);
