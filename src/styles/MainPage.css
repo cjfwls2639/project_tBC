@@ -1,0 +1,197 @@
+.main-content {
+  background-color: #f5f5f5;
+  min-height: 100vh;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.project-title {
+  font-size: 24px;
+  color: #333;
+  margin: 0;
+  text-align: left;
+}
+
+.content-container {
+  background-color: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  margin: 0 auto;
+  min-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.project-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.navbar-brand h1 {
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.navbar-brand h1:hover {
+  opacity: 0.8;
+}
+
+.navbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Auth button styles */
+.auth-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.auth-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background-color: white;
+  min-width: 180px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  padding: 8px 0;
+  z-index: 1000;
+}
+
+.auth-menu-item {
+  all: unset; /* 브라우저 기본 스타일 제거 */
+  cursor: pointer;
+  color: #000000; /* 원하는 링크 색상 */
+  align-items: center;
+  padding: 10px 16px;
+  font-size: 0.9em;
+  transition: background-color 0.2s;
+}
+
+.auth-menu-item:hover {
+  background-color: #f5f5f5;
+}
+
+.auth-menu-item .material-icons {
+  font-size: 1.2em;
+  margin-right: 10px;
+  color: #666;
+}
+
+.auth-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5em;
+}
+
+.auth-btn:hover {
+  background-color: #f0f0f0;
+}
+
+.material-icons {
+  font-size: 1.5em;
+  color: #333;
+}
+
+/* AlarmMenu.css */
+.alarm-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.alarm-btn {
+  background: none;
+  border: none;
+  font-size: 1.2em;
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.alarm-btn:hover {
+  background-color: #f0f0f0;
+}
+
+.alarm-badge {
+  position: absolute;
+  top: -5px;
+  right: 0;
+  background-color: #ff4444;
+  color: white;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 0.7em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.alarm-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  width: 300px;
+  background-color: white;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.alarm-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.alarm-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid #eee;
+  font-size: 0.9rem;
+}
+
+.alarm-item:last-child {
+  border-bottom: none;
+}
+
+.alarm-item.error {
+  color: #d9534f;
+}
+
+.alarm-header {
+  padding: 12px 16px;
+  font-weight: bold;
+  background-color: #f7f7f7;
+  border-bottom: 1px solid #ddd;
+}
+
+.task-title {
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.task-due-date {
+  font-size: 0.8rem;
+  color: #777;
+}
