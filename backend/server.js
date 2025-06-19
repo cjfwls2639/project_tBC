@@ -18,8 +18,7 @@ const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 // 활동 로그 기록 함수
 const logActivity = async (
-  connection,
-  userId,
+  userId, // 첫 번째 매개변수에서 connection 제거
   projectId,
   taskId,
   actionType,
@@ -28,17 +27,21 @@ const logActivity = async (
   const sql =
     "INSERT INTO activity_logs (user_id, project_id, task_id, action_type, details) VALUES (?, ?, ?, ?, ?)";
   try {
-    await connection.query(sql, [
-      userId,
-      projectId,
-      taskId,
-      actionType,
-      JSON.stringify(details),
-    ]);
-    console.log(`[${actionType}] by user ${userId} for project ${projectId}`);
+    // 항상 db 풀을 사용하여 promise 기반으로 쿼리 실행
+    await db
+      .promise()
+      .query(sql, [
+        userId,
+        projectId,
+        taskId,
+        actionType,
+        JSON.stringify(details),
+      ]);
+    console.log(`Activity logged: ${actionType}`);
   } catch (err) {
-    console.error("Error logging activity in transaction:", err);
-    throw err;
+    console.error("Error logging activity:", err);
+    // 여기서 에러를 throw 할지 여부는 애플리케이션 로직에 따라 결정
+    // throw err;
   }
 };
 
@@ -420,16 +423,9 @@ app.delete("/api/projects/:id", async (req, res) => {
     }
 
     //4. 콘솔에 프로젝트 삭제 로그 띄우기
-    await logActivity(
-      connection,
-      userId,
-      id,
-      null,
-      "PROJECT_DELETED",
-      {
-        projectName: projectRows[0].project_name,
-      }
-    );
+    await logActivity(connection, userId, id, null, "PROJECT_DELETED", {
+      projectName: projectRows[0].project_name,
+    });
 
     // 5. 소유자가 맞다면 프로젝트 삭제 진행
     const [deleteResult] = await connection.query(
@@ -626,16 +622,9 @@ app.get("/api/projects/:projectId/tasks", (req, res) => {
 });
 
 // 5.2. 새로운 업무 생성 (CREATE)
-app.post("/api/projects/:projectId/tasks", (req, res) => {
+app.post("/api/projects/:projectId/tasks", async (req, res) => {
   const { projectId } = req.params;
-  const {
-    title,
-    content,
-    status,
-    due_date,
-    assigned_to_user_id,
-    created_by_user_id,
-  } = req.body;
+  const { title, content, status, due_date, created_by_user_id } = req.body;
 
   if (!title || !created_by_user_id) {
     return res
@@ -643,46 +632,84 @@ app.post("/api/projects/:projectId/tasks", (req, res) => {
       .json({ error: "업무 제목과 생성자 ID는 필수입니다." });
   }
 
-  const sql = `
+  let connection;
+  try {
+    // 1. DB 풀에서 커넥션 가져오기
+    connection = await db.promise().getConnection();
+    // 2. 트랜잭션 시작
+    await connection.beginTransaction();
+
+    // 3. 'tasks' 테이블에 새 업무 삽입
+    const taskInsertSql = `
         INSERT INTO tasks
-        (project_id, title, content, status, due_date, assigned_to_user_id, created_by_user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (project_id, task_name, content, due_date, status, created_by_user_id)
+        VALUES (?, ?, ?, ?, ?, ?)
     `;
-  db.query(
-    sql,
-    [
+    const [taskResult] = await connection.execute(taskInsertSql, [
       projectId,
       title,
       content,
-      status || "To Do",
-      due_date,
-      assigned_to_user_id,
+      due_date || null,
+      status || "todo", // DB ENUM 기본값 'todo'와 일치 또는 프론트에서 보낸 값
       created_by_user_id,
-    ],
-    (err, result) => {
-      if (err) {
-        console.error("Error creating task:", err);
-        return res
-          .status(500)
-          .json({ error: "업무 생성 중 오류가 발생했습니다." });
-      }
-      const newTaskId = result.insertId;
-      // 활동 로그 기록
-      logActivity(created_by_user_id, projectId, newTaskId, "TASK_CREATED", {
-        taskTitle: title,
-      });
-      // TODO: assigned_to_user_id가 있다면 해당 사용자에게 알림 생성 로직 추가
-      res
-        .status(201)
-        .json({ message: "업무가 성공적으로 생성되었습니다.", id: newTaskId });
+    ]);
+
+    const newTaskId = taskResult.insertId;
+
+    // 4. 'task_assignees' 테이블에 생성자를 담당자로 삽입
+    const assigneeInsertSql = `
+      INSERT INTO task_assignees (task_id, user_id)
+      VALUES (?, ?)
+    `;
+    // user_id에 업무 생성자인 created_by_user_id 값을 사용
+    await connection.execute(assigneeInsertSql, [
+      newTaskId,
+      created_by_user_id,
+    ]);
+
+    // 5. 활동 로그 기록 (logActivity 함수는 트랜잭션과 별개로 실행되거나, connection을 받을 수 있도록 수정 필요)
+    // 여기서는 logActivity가 connection을 받지 않고 독립적으로 db 풀을 사용한다고 가정
+    // (이전 답변에서 logActivity 함수 수정 제안 참고)
+    logActivity(
+      created_by_user_id,
+      parseInt(projectId),
+      newTaskId,
+      "TASK_CREATED",
+      { taskTitle: title }
+    ).catch((logErr) => {
+      // 로그 기록 실패는 주 작업의 성공/실패에 영향을 미치지 않도록 콘솔에만 에러 출력
+      console.error(
+        "활동 로그 기록 중 오류 발생 (업무 생성 자체는 성공 가능):",
+        logErr
+      );
+    });
+
+    // 6. 모든 DB 작업 성공 시 트랜잭션 커밋
+    await connection.commit();
+
+    res.status(201).json({
+      message:
+        "업무가 성공적으로 생성되었으며, 생성자가 담당자로 자동 배정되었습니다.",
+      id: newTaskId,
+    });
+  } catch (err) {
+    console.error("Error creating task and auto-assigning creator:", err);
+    // 7. DB 작업 중 오류 발생 시 트랜잭션 롤백
+    if (connection) {
+      await connection.rollback();
     }
-  );
+    res.status(500).json({
+      error: "업무 생성 중 오류가 발생했습니다.",
+      details: err.message,
+    });
+  } finally {
+    // 8. 사용한 DB 커넥션 반환
+    if (connection) {
+      connection.release();
+    }
+  }
 });
 
-/**
- * 특정 업무 상세 정보 가져오기 (담당자 및 댓글 목록 포함)
- * GET /api/tasks/:taskId
- */
 app.get("/api/tasks/:taskId", async (req, res) => {
   // 1. URL 경로에서 특정 업무의 ID를 추출합니다.
   const { taskId } = req.params;
@@ -749,12 +776,10 @@ app.get("/api/tasks/:taskId", async (req, res) => {
 
 // 5.4. 업무 정보 수정 (UPDATE)
 app.put("/api/tasks/:id", (req, res) => {
-  // TODO: 인증 로직 추가 (프로젝트 멤버만 수정 가능하도록)
   const { id } = req.params;
   const { title, description, status, due_date, assigned_to_user_id } =
     req.body;
 
-  // TODO: 변경된 필드만 감지하여 동적 쿼리 생성 및 활동 로그 상세 기록
   const sql = `
         UPDATE tasks SET
         title = ?, content = ?, status = ?, due_date = ?, assigned_to_user_id = ?
@@ -775,8 +800,6 @@ app.put("/api/tasks/:id", (req, res) => {
           .status(404)
           .json({ message: "업무를 찾을 수 없거나 변경 사항이 없습니다." });
       }
-      // TODO: 활동 로그 기록 ('TASK_STATUS_UPDATED', 'TASK_ASSIGNEE_CHANGED' 등)
-      // TODO: 담당자 변경/지정 시 알림 생성
       res.json({ message: "업무가 성공적으로 수정되었습니다." });
     }
   );
@@ -977,7 +1000,9 @@ app.post("/api/projects/:projectId/users", async (req, res) => {
       );
 
     if (exists.length > 0) {
-      return res.status(409).json({ message: "이미 프로젝트에 추가된 사용자입니다." });
+      return res
+        .status(409)
+        .json({ message: "이미 프로젝트에 추가된 사용자입니다." });
     }
 
     // 3. 사용자 추가

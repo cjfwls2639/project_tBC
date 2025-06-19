@@ -6,11 +6,10 @@ import "./styles/Sidebar.css";
 import "./styles/NavigationBar.css";
 import "./styles/MainContent.css";
 
-
 //const formatDate = (dateString) => {
-  //if (!dateString) return "없음";
-  //const date = new Date(dateString);
-  //return isNaN(date) ? "없음" : date.toLocaleDateString("ko-KR");
+//if (!dateString) return "없음";
+//const date = new Date(dateString);
+//return isNaN(date) ? "없음" : date.toLocaleDateString("ko-KR");
 //};
 
 const calculateDDay = (endDate) => {
@@ -91,6 +90,118 @@ const ProjectModal = ({ isOpen, onClose, onSubmit }) => {
   );
 };
 
+// 업무 생성/수정 폼 컴포넌트
+const TaskForm = ({
+  initialData,
+  onSubmit,
+  onCancel,
+  formType = "create",
+  isLoading,
+}) => {
+  const [title, setTitle] = useState(initialData?.title || "");
+  const [description, setDescription] = useState(
+    initialData?.description || ""
+  );
+  const [status, setStatus] = useState(initialData?.status || "todo");
+  const [dueDate, setDueDate] = useState(
+    initialData?.due_date
+      ? new Date(initialData.due_date).toISOString().split("T")[0]
+      : ""
+  );
+  useEffect(() => {
+    setTitle(initialData?.title || "");
+    setDescription(initialData?.description || "");
+    setStatus(initialData?.status || "todo");
+    setDueDate(
+      initialData?.due_date
+        ? new Date(initialData.due_date).toISOString().split("T")[0]
+        : ""
+    );
+  }, [initialData]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!title.trim()) {
+      alert("업무 제목은 필수입니다.");
+      return;
+    }
+    onSubmit({ title, description, status, due_date: dueDate || null });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="task-form">
+      <h3>{formType === "create" ? "새 업무 생성" : "업무 수정/상세"}</h3>
+      <div className="form-group">
+        <label htmlFor="taskTitle">업무 제목</label>
+        <input
+          id="taskTitle"
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="업무 제목을 입력하세요"
+          required
+          disabled={formType === "detail"} // 상세 보기 모드에서는 비활성화
+        />
+      </div>
+      <div className="form-group">
+        <label htmlFor="taskDescription">업무 내용</label>
+        <textarea
+          id="taskDescription"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="업무 내용을 입력하세요"
+          rows="4"
+          disabled={formType === "detail"}
+        />
+      </div>
+      <div className="form-group">
+        <label htmlFor="taskStatus">상태</label>
+        <select
+          id="taskStatus"
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+          disabled={formType === "detail"}
+        >
+          <option value="todo">할 일 (To Do)</option>
+          <option value="doing">진행 중 (In Progress)</option>
+          <option value="done">완료 (Done)</option>
+          <option value="pending">보류 (Pending)</option>
+          {/* 백엔드와 상태값 일치 필요 */}
+        </select>
+      </div>
+      <div className="form-group">
+        <label htmlFor="taskDueDate">마감일</label>
+        <input
+          id="taskDueDate"
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          disabled={formType === "detail"}
+        />
+      </div>
+      <div className="form-buttons">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="cancel-btn"
+          disabled={isLoading}
+        >
+          {formType === "detail" ? "목록으로" : "취소"}
+        </button>
+        {formType !== "detail" && (
+          <button type="submit" className="submit-btn" disabled={isLoading}>
+            {isLoading
+              ? "저장 중..."
+              : formType === "create"
+              ? "생성"
+              : "업데이트"}
+          </button>
+        )}
+      </div>
+    </form>
+  );
+};
+
 const MainPage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -108,14 +219,50 @@ const MainPage = () => {
     JSON.parse(localStorage.getItem("user"))
   );
   const [activityLogs, setActivityLogs] = useState([]);
-
   const [newUsername, setNewUsername] = useState("");
   const [projectUsers, setProjectUsers] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [isLoadingTasks, setIsLoadingTasks] = useState(false);
+  const [taskError, setTaskError] = useState(null);
+  const [taskSubTab, setTaskSubTab] = useState("목록");
+  const [selectedTaskForEdit, setSelectedTaskForEdit] = useState(null);
 
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString("ko-KR");
-  };
+  const fetchTasksByProjectId = useCallback(async (projectId) => {
+    if (!projectId) {
+      setTasks([]);
+      return;
+    }
+    setIsLoadingTasks(true);
+    setTaskError(null);
+    try {
+      const response = await axios.get(`/api/projects/${projectId}/tasks`);
+      const formattedTasks = response.data.map((task) => ({
+        ...task,
+        title: task.task_name,
+        description: task.content,
+      }));
+      setTasks(formattedTasks);
+    } catch (err) {
+      console.error("업무 목록 조회 실패:", err);
+      setTaskError(
+        `업무 목록 로딩 실패: ${err.response?.data?.error || err.message}`
+      );
+      setTasks([]);
+    } finally {
+      setIsLoadingTasks(false);
+    }
+  }, []);
+
+  const fetchActivityLogs = useCallback(async () => {
+    try {
+      const res = await axios.get("/api/activity_logs", {
+        params: { projectId: selectedProjectId },
+      });
+      setActivityLogs(res.data);
+    } catch (err) {
+      console.error("활동 로그 불러오기 실패:", err);
+    }
+  }, [selectedProjectId]);
 
   const fetchProjects = useCallback(async () => {
     if (!user || !user.user_id) {
@@ -125,21 +272,23 @@ const MainPage = () => {
     }
     try {
       setLoading(true);
+      setError(null);
       const response = await axios.get("/api/projects", {
         params: { userId: user.user_id }, // 서버 API가 요구하는 userId를 쿼리 파라미터로 전달
       });
       setProjects(response.data);
-      // 목록을 새로 불러온 후, 첫 번째 프로젝트를 자동으로 선택
       if (response.data.length > 0) {
-        // 이전에 선택한 프로젝트가 있다면 유지, 없다면 첫번째 프로젝트 선택
         if (
           !selectedProjectId ||
           !response.data.find((p) => p.project_id === selectedProjectId)
         ) {
-          setSelectedProjectId(response.data[0].project_id);
+          const firstProjectId = response.data[0].project_id;
+          setSelectedProjectId(firstProjectId);
         }
       } else {
         setSelectedProjectId(null); // 프로젝트가 없으면 선택 해제
+        setTasks([]);
+        setActivityLogs([]);
       }
     } catch (error) {
       console.error("프로젝트 목록을 불러오는 데 실패했습니다:", error);
@@ -178,6 +327,39 @@ const MainPage = () => {
     }
   }, [navigate, fetchAlarms, fetchProjects]);
 
+  useEffect(() => {
+    if (selectedProjectId) {
+      if (selectedTab === "업무") {
+        if (taskSubTab === "목록") {
+          console.log(
+            `업무 탭 - 목록 가져오기 호출 (projectId: ${selectedProjectId})`
+          );
+          fetchTasksByProjectId(selectedProjectId);
+        }
+      } else if (selectedTab === "로그") {
+        console.log(
+          `로그 탭 - 로그 가져오기 호출 (projectId: ${selectedProjectId})`
+        );
+        fetchActivityLogs(selectedProjectId);
+      }
+    } else {
+      setTasks([]);
+      setActivityLogs([]);
+      console.log("선택된 프로젝트 없음 - 데이터 초기화");
+    }
+  }, [
+    selectedTab,
+    selectedProjectId,
+    taskSubTab,
+    fetchTasksByProjectId,
+    fetchActivityLogs,
+  ]);
+
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString("ko-KR");
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("user");
     navigate("/login");
@@ -194,7 +376,7 @@ const MainPage = () => {
       const response = await axios.post("/api/projects", {
         name: projectData.name,
         content: projectData.content,
-        end_date: projectData.end_date, 
+        end_date: projectData.end_date,
         created_by: user.user_id,
       });
       alert(response.data.message);
@@ -250,66 +432,148 @@ const MainPage = () => {
     }
   };
 
-  const fetchActivityLogs = useCallback(async () => {
-  try {
-    const res = await axios.get("/api/activity_logs", {
-      params: { projectId: selectedProjectId },
-    });
-    setActivityLogs(res.data);
-  } catch (err) {
-    console.error("활동 로그 불러오기 실패:", err);
-  }
-}, [selectedProjectId]);
+  const handleAddUserToProject = async () => {
+    if (!newUsername || !selectedProjectId) {
+      alert("사용자 이름 또는 프로젝트 ID가 없습니다.");
+      return;
+    }
 
-const handleAddUserToProject = async () => {
-  if (!newUsername || !selectedProjectId) {
-    alert("사용자 이름 또는 프로젝트 ID가 없습니다.");
-    return;
-  }
+    try {
+      const response = await axios.post(
+        `/api/projects/${selectedProjectId}/users`,
+        { username: newUsername }
+      );
+      alert("사용자 추가 성공!");
+      setNewUsername("");
+      fetchProjectUsers();
+    } catch (err) {
+      console.error("사용자 추가 실패:", err);
+      alert(err.response?.data?.error || "사용자 추가 중 오류 발생");
+    }
+  };
 
-  try {
-    const response = await axios.post(`/api/projects/${selectedProjectId}/users`, {username: newUsername,});
-    alert("사용자 추가 성공!");
-    setNewUsername("");
-    fetchProjectUsers();
-  } catch (err) {
-    console.error("사용자 추가 실패:", err);
-    alert(err.response?.data?.error || "사용자 추가 중 오류 발생");
-  }
-};
+  const fetchProjectUsers = useCallback(async () => {
+    if (!selectedProjectId) return;
+    try {
+      const res = await axios.get(`/api/projects/${selectedProjectId}/users`);
+      setProjectUsers(res.data);
+    } catch (err) {
+      console.error("프로젝트 사용자 목록 불러오기 실패:", err);
+    }
+  }, [selectedProjectId]);
 
-const fetchProjectUsers = useCallback(async () => {
-  if (!selectedProjectId) return;
-  try {
-    const res = await axios.get(`/api/projects/${selectedProjectId}/users`);
-    setProjectUsers(res.data);
-  } catch (err) {
-    console.error("프로젝트 사용자 목록 불러오기 실패:", err);
-  }
-}, [selectedProjectId]);
+  const handleCreateTaskSubmit = async (taskFormData) => {
+    if (!selectedProjectId || !user || !user.user_id) return;
+    const apiTaskData = {
+      title: taskFormData.title,
+      content: taskFormData.description,
+      status: taskFormData.status,
+      due_date: taskFormData.due_date || null,
+      created_by_user_id: user.user_id,
+    };
+    setIsLoadingTasks(true);
+    setTaskError(null);
+    try {
+      await axios.post(`/api/projects/${selectedProjectId}/tasks`, apiTaskData);
+      alert("업무가 성공적으로 생성되었습니다.");
+      await fetchTasksByProjectId(selectedProjectId);
+      setTaskSubTab("목록");
+    } catch (err) {
+      console.error("업무 생성 실패:", err);
+      setTaskError(
+        `업무 생성 실패: ${
+          err.response?.data?.error ||
+          err.response?.data?.message ||
+          err.message
+        }`
+      );
+    } finally {
+      setIsLoadingTasks(false);
+    }
+  };
 
+  const handleUpdateTaskSubmit = async (taskFormData) => {
+    if (
+      !selectedTaskForEdit ||
+      !selectedTaskForEdit.task_id ||
+      !user ||
+      !user.user_id
+    )
+      return;
+    // API 명세 5.4. UPDATE - /api/tasks/:id (PUT)
+    // 요청 body: title, description (content), status, due_date, assigned_to_user_id
+    const apiTaskData = {
+      title: taskFormData.title,
+      description: taskFormData.description, // 백엔드는 'content'로 받을 수 있음. API 확인.
+      status: taskFormData.status,
+      due_date: taskFormData.due_date || null,
+      // assigned_to_user_id: 필요시 추가
+    };
+    setIsLoadingTasks(true);
+    setTaskError(null);
+    try {
+      await axios.put(`/api/tasks/${selectedTaskForEdit.task_id}`, apiTaskData);
+      alert("업무가 성공적으로 수정되었습니다.");
+      await fetchTasksByProjectId(selectedProjectId);
+      setTaskSubTab("목록");
+      setSelectedTaskForEdit(null);
+    } catch (err) {
+      console.error("업무 수정 실패:", err);
+      setTaskError(
+        `업무 수정 실패: ${
+          err.response?.data?.error ||
+          err.response?.data?.message ||
+          err.message
+        }`
+      );
+    } finally {
+      setIsLoadingTasks(false);
+    }
+  };
 
-
-
-useEffect(() => {
-  if (selectedTab === "로그" && selectedProjectId) {
-    fetchActivityLogs();
-  }
-}, [selectedTab, selectedProjectId, fetchActivityLogs]);
-useEffect(() => {
-  if (selectedTab === "사용자" && selectedProjectId) {
-    fetchProjectUsers();
-  }
-}, [selectedTab, selectedProjectId, fetchProjectUsers]);
-
-
+  const handleDeleteTask = async (taskIdToDelete) => {
+    if (!taskIdToDelete || !user || !user.user_id) return;
+    if (window.confirm("정말로 이 업무를 삭제하시겠습니까?")) {
+      setIsLoadingTasks(true);
+      setTaskError(null);
+      try {
+        // API 명세 5.5. DELETE - /api/tasks/:id
+        // 요청 body로 userId 전달 (백엔드 API가 이를 처리한다고 가정)
+        await axios.delete(`/api/tasks/${taskIdToDelete}`, {
+          data: { userId: user.user_id },
+        });
+        alert("업무가 성공적으로 삭제되었습니다.");
+        await fetchTasksByProjectId(selectedProjectId);
+        if (
+          taskSubTab === "상세" &&
+          selectedTaskForEdit?.task_id === taskIdToDelete
+        ) {
+          setTaskSubTab("목록");
+          setSelectedTaskForEdit(null);
+        }
+      } catch (err) {
+        console.error("업무 삭제 실패:", err);
+        setTaskError(
+          `업무 삭제 실패: ${
+            err.response?.data?.error ||
+            err.response?.data?.message ||
+            err.message
+          }`
+        );
+      } finally {
+        setIsLoadingTasks(false);
+      }
+    }
+  };
 
   const toggleAccountMenu = () => setIsAccountMenuOpen(!isAccountMenuOpen);
   const toggleAlarmMenu = () => setIsAlarmMenuOpen(!isAlarmMenuOpen);
   const openModal = () => setIsModalOpen(true);
   const closeModal = () => setIsModalOpen(false);
 
-  const selectedProject = projects.find((p) => p.project_id === selectedProjectId);
+  const selectedProject = projects.find(
+    (p) => p.project_id === selectedProjectId
+  );
 
   return (
     <div>
@@ -390,8 +654,10 @@ useEffect(() => {
                 {/* CHANGED: projects 배열을 순회하며 project.id와 project.name을 사용 */}
                 {projects.map((project) => (
                   <li
-                    key={project.id}
-                    className={project.project_id === selectedProjectId ? "active" : ""}
+                    key={project.project_id}
+                    className={
+                      project.project_id === selectedProjectId ? "active" : ""
+                    }
                   >
                     <button
                       className="sidebar-link"
@@ -465,76 +731,217 @@ useEffect(() => {
                   <div className="project-details-content">
                     {/* 메인 화면에서 메인 버튼을 누를 시 뜨는 화면 */}
                     {selectedTab === "메인" && (
-                    <div>
-                      <h2>메인 현황</h2>
-                      <p><strong>프로젝트 이름:</strong> {selectedProject.project_name}</p>
-                      <p>
-                      <strong>종료일:</strong> {formatDate(selectedProject.end_date)}{" "}
-                      <strong style={{ color: "red" }}>({calculateDDay(selectedProject.end_date)})</strong>
-                      </p>
-                      <p><strong>프로젝트 설명:</strong> {selectedProject.content || "설명이 없습니다."}</p>
-                      <p><strong>달성률:</strong> {selectedProject.progress || 0}%</p>
-                    </div>
-                  )}
+                      <div>
+                        <h2> 프로젝트 요약 </h2>
+                        <p>
+                          <strong>프로젝트 마감일:</strong>{" "}
+                          {formatDate(selectedProject.end_date)}{" "}
+                          <strong style={{ color: "red" }}>
+                            ({calculateDDay(selectedProject.end_date)})
+                          </strong>
+                        </p>
+                        <p>
+                          <strong>달성률:</strong> {50}%
+                        </p>
 
-                  {/* 메인 화면에서 업무 버튼을 누를 시 뜨는 화면 */}
-                  {selectedTab === "업무" && (
-                  <div>
-                      <h2>업무 현황</h2>
-                      {/* 업무 내용 렌더링 */}
-                  </div>
-                  )}
-
-                   {/* 메인 화면에서 로그 버튼을 누를 시 뜨는 화면 */}
-                    {selectedTab === "로그" && (
-                  <div>
-                    <h2>활동 로그</h2>
-                    {activityLogs.length === 0 ? (
-                      <p>활동 로그가 없습니다.</p>
-                    ) : (
-                      <ul className="activity-log-list">
-                        {activityLogs.map((log) => (
-                          <li key={log.id}>
-                            [{new Date(log.created_at).toLocaleString("ko-KR")}] {log.action_type} - {JSON.stringify(log.details)}
-                          </li>
-                        ))}
-                      </ul>
+                        <div className="progress-bar-wrapper">
+                          <div
+                            className="progress-bar-fill"
+                            style={{ width: `${50}%` }}
+                          ></div>
+                        </div>
+                        <p>
+                          <strong>프로젝트 이름:</strong>{" "}
+                          {selectedProject.project_name}
+                        </p>
+                        <p>
+                          <strong>프로젝트 설명:</strong>{" "}
+                          {selectedProject.content || "설명이 없습니다."}
+                        </p>
+                      </div>
                     )}
-                  </div>
-                )}
+                    {/* 메인 화면에서 업무 버튼을 누를 시 뜨는 화면 */}
+                    {selectedTab === "업무" && (
+                      <div className="task-section">
+                        <div className="task-subtabs">
+                          <button
+                            className={taskSubTab === "목록" ? "active" : ""}
+                            onClick={() => {
+                              setTaskSubTab("목록");
+                              setSelectedTaskForEdit(null);
+                              // fetchTasksByProjectId(selectedProjectId); // 목록 탭 클릭 시 새로고침
+                            }}
+                          >
+                            업무 목록
+                          </button>
+                          <button
+                            className={taskSubTab === "생성" ? "active" : ""}
+                            onClick={() => {
+                              setTaskSubTab("생성");
+                              setSelectedTaskForEdit(null); // 생성 폼 열 때 수정 상태 초기화
+                            }}
+                          >
+                            새 업무 생성
+                          </button>
+                          {selectedTaskForEdit && taskSubTab === "상세" && (
+                            <button className="active">
+                              {" "}
+                              {/* 상세/수정 탭은 동적으로만 표시 */}
+                              업무 상세/수정
+                            </button>
+                          )}
+                        </div>
 
-                {/* 메인 화면에서 알람 버튼을 누를 시 뜨는 화면 */}
-                {selectedTab === "알람" && (
-                <div>
-                  <h2> 알람 </h2>
-                  {/* 알림 내용 렌더링 */}
-                </div>
-                )}
+                        {taskError && (
+                          <p className="error-message">{taskError}</p>
+                        )}
 
-                {selectedTab === "사용자" && (
-                  <div>
-                    <h2>프로젝트 참여자 ({projectUsers.length}명)</h2>
-                    <input
-                      type="text"
-                      placeholder="추가할 사용자 이름 입력"
-                      value={newUsername}
-                      onChange={(e) => setNewUsername(e.target.value)}
-                    />
-                    <button onClick={handleAddUserToProject}>사용자 추가</button>
+                        {taskSubTab === "목록" && (
+                          <div className="task-list-container">
+                            {isLoadingTasks && tasks.length === 0 ? (
+                              <p>업무 목록을 불러오는 중...</p>
+                            ) : !isLoadingTasks && tasks.length === 0 ? (
+                              <p>
+                                등록된 업무가 없습니다. '새 업무 생성' 탭에서
+                                추가하세요.
+                              </p>
+                            ) : (
+                              <ul className="task-list">
+                                {tasks.map((task) => (
+                                  <li key={task.task_id} className="task-item">
+                                    <div>
+                                      <h3>
+                                        {task.title}
+                                        <span
+                                          className={`status status-${
+                                            task.status
+                                              ?.toLowerCase()
+                                              .replace(/\s+/g, "-") || "unknown"
+                                          }`}
+                                        >
+                                          {task.status || "상태없음"}
+                                        </span>
+                                      </h3>
+                                      <p>{task.description || "내용 없음"}</p>
+                                      <small>
+                                        생성자ID: {task.created_by_user_id} |
+                                        생성일: {formatDate(task.created_at)}
+                                        {task.assignees &&
+                                          ` | 담당자: ${task.assignees}`}
+                                        {task.due_date &&
+                                          ` | 마감일: ${formatDate(
+                                            task.due_date
+                                          )}`}
+                                      </small>
+                                    </div>
+                                    <div className="task-item-actions">
+                                      <button
+                                        onClick={() => {
+                                          setSelectedTaskForEdit(task);
+                                          setTaskSubTab("상세"); // '상세' 탭으로 변경
+                                        }}
+                                        className="edit-btn"
+                                      >
+                                        수정/상세
+                                      </button>
+                                      <button
+                                        onClick={() =>
+                                          handleDeleteTask(task.task_id)
+                                        }
+                                        className="delete-btn"
+                                        disabled={isLoadingTasks}
+                                      >
+                                        삭제
+                                      </button>
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
 
-                    <ul>
-                      {projectUsers.length === 0 ? (
-                        <li>아직 참여한 사용자가 없습니다.</li>
-                      ) : (
-                        projectUsers.map((user) => (
-                          <li key={user.user_id}>
-                            ID: {user.user_id} - 이름: {user.username}
-                          </li>
-                        ))
-                      )}
-                    </ul>
-                  </div>
-                )}
+                        {taskSubTab === "생성" && (
+                          <TaskForm
+                            onSubmit={handleCreateTaskSubmit}
+                            onCancel={() => setTaskSubTab("목록")}
+                            formType="create"
+                            isLoading={isLoadingTasks}
+                          />
+                        )}
+
+                        {taskSubTab === "상세" && selectedTaskForEdit && (
+                          <TaskForm
+                            initialData={selectedTaskForEdit}
+                            onSubmit={handleUpdateTaskSubmit}
+                            onCancel={() => {
+                              setTaskSubTab("목록");
+                              setSelectedTaskForEdit(null);
+                            }}
+                            formType="edit" // 'edit' 또는 'detail'로 구분하여 폼 비활성화 제어 가능
+                            isLoading={isLoadingTasks}
+                          />
+                        )}
+                      </div>
+                    )}
+
+                    {/* 메인 화면에서 로그 버튼을 누를 시 뜨는 화면 */}
+                    {selectedTab === "로그" && (
+                      <div>
+                        <h2>활동 로그</h2>
+                        {activityLogs.length === 0 ? (
+                          <p>활동 로그가 없습니다.</p>
+                        ) : (
+                          <ul className="activity-log-list">
+                            {activityLogs.map((log) => (
+                              <li key={log.log_id}>
+                                [
+                                {new Date(log.created_at).toLocaleString(
+                                  "ko-KR"
+                                )}
+                                ] {log.action_type} -{" "}
+                                {JSON.stringify(log.details)}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 메인 화면에서 알람 버튼을 누를 시 뜨는 화면 */}
+                    {selectedTab === "알람" && (
+                      <div>
+                        <h2> 알람 </h2>
+                        {/* 알림 내용 렌더링 */}
+                      </div>
+                    )}
+
+                    {selectedTab === "사용자" && (
+                      <div>
+                        <h2>프로젝트 참여자 ({projectUsers.length}명)</h2>
+                        <input
+                          type="text"
+                          placeholder="추가할 사용자 이름 입력"
+                          value={newUsername}
+                          onChange={(e) => setNewUsername(e.target.value)}
+                        />
+                        <button onClick={handleAddUserToProject}>
+                          사용자 추가
+                        </button>
+
+                        <ul>
+                          {projectUsers.length === 0 ? (
+                            <li>아직 참여한 사용자가 없습니다.</li>
+                          ) : (
+                            projectUsers.map((user) => (
+                              <li key={user.user_id}>
+                                ID: {user.user_id} - 이름: {user.username}
+                              </li>
+                            ))
+                          )}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
