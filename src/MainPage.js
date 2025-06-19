@@ -140,6 +140,7 @@ const TaskForm = ({
           onChange={(e) => setTitle(e.target.value)}
           placeholder="업무 제목을 입력하세요"
           required
+          maxLength="20"
           disabled={formType === "detail"} // 상세 보기 모드에서는 비활성화
         />
       </div>
@@ -507,7 +508,7 @@ const MainPage = () => {
       description: taskFormData.description, // 백엔드는 'content'로 받을 수 있음. API 확인.
       status: taskFormData.status,
       due_date: taskFormData.due_date || null,
-      // assigned_to_user_id: 필요시 추가
+      created_by_user_id: user.user_id,
     };
     setIsLoadingTasks(true);
     setTaskError(null);

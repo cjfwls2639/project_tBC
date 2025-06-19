@@ -266,9 +266,7 @@ app.post("/api/projects", async (req, res) => {
       projectId,
       null,
       "PROJECT_CREATED",
-      {
-        projectName: name,
-      }
+      JSON.stringify({ projectName: name })
     );
 
     await connection.commit();
@@ -775,36 +773,54 @@ app.get("/api/tasks/:taskId", async (req, res) => {
 });
 
 // 5.4. 업무 정보 수정 (UPDATE)
-app.put("/api/tasks/:id", (req, res) => {
-  const { id } = req.params;
-  const { title, description, status, due_date, assigned_to_user_id } =
-    req.body;
+app.put("/api/tasks/:taskId", (req, res) => {
+  const { taskId } = req.params; // URL에서 taskId 추출
+  const { title, content, due_date, status, created_by_user_id } = req.body;
+
+  // DB 컬럼이 숫자형이라면 taskId를 숫자로 변환하는 것이 좋습니다.
+  const numericTaskId = parseInt(taskId, 10);
+  if (isNaN(numericTaskId)) {
+    return res.status(400).json({ error: "잘못된 task ID 형식입니다." });
+  }
 
   const sql = `
         UPDATE tasks SET
-        title = ?, content = ?, status = ?, due_date = ?, assigned_to_user_id = ?
-        WHERE id = ?
+        task_name = ?, 
+        content = ?, 
+        due_date = ?, 
+        status = ?, 
+        created_by_user_id = ?
+        WHERE task_id = ?
     `;
   db.query(
     sql,
-    [title, content, status, due_date, assigned_to_user_id, id],
+    [title, content, due_date, status, created_by_user_id, numericTaskId], // 수정: numericTaskId 사용 (또는 taskId가 이미 숫자라면 taskId 직접 사용)
     (err, result) => {
       if (err) {
-        console.error("Error updating task:", err);
-        return res
-          .status(500)
-          .json({ error: "업무 수정 중 오류가 발생했습니다." });
+        console.error("업무 수정 중 오류 발생:", err);
+        // 실제 SQL 오류에 대한 자세한 정보를 로깅
+        console.error("SQL 오류 코드:", err.code);
+        console.error("SQL 오류 메시지:", err.sqlMessage);
+        return res.status(500).json({
+          error: "업무 수정 중 오류가 발생했습니다.",
+          details: err.sqlMessage || err.message,
+        });
       }
       if (result.affectedRows === 0) {
-        return res
-          .status(404)
-          .json({ message: "업무를 찾을 수 없거나 변경 사항이 없습니다." });
+        // 이 시점에서는 task_id를 찾지 못했거나,
+        // 전송된 데이터가 기존 데이터와 동일했음을 의미합니다.
+        // 더 구체적인 오류를 위해 task_id가 존재하는지 SELECT로 미리 확인할 수도 있지만, 이 방법도 괜찮습니다.
+        return res.status(404).json({
+          message:
+            "업무를 찾을 수 없거나 변경 사항이 없습니다. (ID: " +
+            numericTaskId +
+            ")",
+        });
       }
       res.json({ message: "업무가 성공적으로 수정되었습니다." });
     }
   );
 });
-
 // 5.5. 업무 삭제 (DELETE) - 관리자 권한 확인 로직 추가
 app.delete("/api/tasks/:id", (req, res) => {
   // TODO: 실제 프로젝트에서는 JWT 인증 미들웨어를 통해 사용자 ID를 가져와야 합니다.
