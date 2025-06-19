@@ -111,6 +111,9 @@ const MainPage = () => {
   );
   const [activityLogs, setActivityLogs] = useState([]);
 
+  const [newUsername, setNewUsername] = useState("");
+  const [projectUsers, setProjectUsers] = useState([]);
+
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleDateString("ko-KR");
@@ -259,11 +262,46 @@ const MainPage = () => {
   }
 }, [selectedProjectId]);
 
+const handleAddUserToProject = async () => {
+  if (!newUsername || !selectedProjectId) {
+    alert("사용자 이름 또는 프로젝트 ID가 없습니다.");
+    return;
+  }
+
+  try {
+    const response = await axios.post(`/api/projects/${selectedProjectId}/users`, {username: newUsername,});
+    alert("사용자 추가 성공!");
+    setNewUsername("");
+    fetchProjectUsers();
+  } catch (err) {
+    console.error("사용자 추가 실패:", err);
+    alert(err.response?.data?.error || "사용자 추가 중 오류 발생");
+  }
+};
+
+const fetchProjectUsers = useCallback(async () => {
+  if (!selectedProjectId) return;
+  try {
+    const res = await axios.get(`/api/projects/${selectedProjectId}/users`);
+    setProjectUsers(res.data);
+  } catch (err) {
+    console.error("프로젝트 사용자 목록 불러오기 실패:", err);
+  }
+}, [selectedProjectId]);
+
+
+
+
 useEffect(() => {
   if (selectedTab === "로그" && selectedProjectId) {
     fetchActivityLogs();
   }
 }, [selectedTab, selectedProjectId, fetchActivityLogs]);
+useEffect(() => {
+  if (selectedTab === "사용자" && selectedProjectId) {
+    fetchProjectUsers();
+  }
+}, [selectedTab, selectedProjectId, fetchProjectUsers]);
 
 
 
@@ -448,6 +486,30 @@ useEffect(() => {
                     <p>프로젝트 설명: {selectedProject.content || "설명이 없습니다."}</p>
                     <p>소유자: {selectedProject.created_by}</p>
                   </>
+                )}
+                {selectedTab === "사용자" && (
+                  <div>
+                    <h2>프로젝트 참여자 ({projectUsers.length}명)</h2>
+                    <input
+                      type="text"
+                      placeholder="추가할 사용자 이름 입력"
+                      value={newUsername}
+                      onChange={(e) => setNewUsername(e.target.value)}
+                    />
+                    <button onClick={handleAddUserToProject}>사용자 추가</button>
+
+                    <ul>
+                      {projectUsers.length === 0 ? (
+                        <li>아직 참여한 사용자가 없습니다.</li>
+                      ) : (
+                        projectUsers.map((user) => (
+                          <li key={user.user_id}>
+                            ID: {user.user_id} - 이름: {user.username}
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  </div>
                 )}
                   </div>
                 </div>

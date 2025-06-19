@@ -934,6 +934,73 @@ app.get("/api/activity_logs", async (req, res) => {
   }
 });
 
+// 사용자 추가
+app.post("/api/projects/:projectId/users", async (req, res) => {
+  const { projectId } = req.params;
+  const { username } = req.body;
+
+  if (!username) {
+    return res.status(400).json({ error: "username이 필요합니다." });
+  }
+
+  try {
+    // 1. username으로 사용자 조회
+    const [users] = await db
+      .promise()
+      .query("SELECT user_id FROM users WHERE username = ?", [username]);
+
+    if (users.length === 0) {
+      return res.status(404).json({ error: "해당 사용자를 찾을 수 없습니다." });
+    }
+
+    const userId = users[0].user_id;
+
+    // 2. 이미 프로젝트에 포함됐는지 확인
+    const [exists] = await db
+      .promise()
+      .query(
+        "SELECT * FROM project_members WHERE project_id = ? AND user_id = ?",
+        [projectId, userId]
+      );
+
+    if (exists.length > 0) {
+      return res.status(409).json({ message: "이미 프로젝트에 추가된 사용자입니다." });
+    }
+
+    // 3. 사용자 추가
+    await db
+      .promise()
+      .query(
+        "INSERT INTO project_members (project_id, user_id, role_in_project) VALUES (?, ?, 'member')",
+        [projectId, userId]
+      );
+
+    res.status(201).json({ message: "사용자 추가 성공!" });
+  } catch (err) {
+    console.error("사용자 추가 중 오류:", err);
+    res.status(500).json({ error: "사용자 추가 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/api/projects/:projectId/users", async (req, res) => {
+  const { projectId } = req.params;
+
+  try {
+    const [rows] = await db.promise().query(
+      `SELECT u.user_id, u.username, u.email, pm.role_in_project
+       FROM project_members pm
+       JOIN users u ON pm.user_id = u.user_id
+       WHERE pm.project_id = ?`,
+      [projectId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error("프로젝트 사용자 조회 실패:", err);
+    res.status(500).json({ error: "사용자 목록 조회 중 오류 발생" });
+  }
+});
+
 // 서버 시작
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
