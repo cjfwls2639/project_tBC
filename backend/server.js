@@ -360,13 +360,13 @@ app.get("/api/projects/:id", async (req, res) => {
 app.put("/api/projects/:id", (req, res) => {
   // TODO: 인증 로직 추가 (프로젝트 manager 또는 owner만 수정 가능하도록)
   const { id } = req.params;
-  const { name, content } = req.body;
+  const { name, content, end_date } = req.body;
   if (!name) {
     return res.status(400).json({ error: "프로젝트 이름은 필수입니다." });
   }
 
-  const sql = "UPDATE projects SET name = ?, content = ? WHERE id = ?";
-  db.query(sql, [name, description, id], (err, result) => {
+  const sql = "UPDATE projects SET project_name = ?, content = ?, end_date = ? WHERE project_id = ?";
+  db.query(sql, [name, content, end_date,id], (err, result) => {
     if (err) {
       console.error("Error updating project:", err);
       return res

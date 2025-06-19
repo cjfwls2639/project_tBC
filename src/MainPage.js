@@ -5,15 +5,10 @@ import "./styles/MainPage.css";
 import "./styles/Sidebar.css";
 import "./styles/NavigationBar.css";
 import "./styles/MainContent.css";
-import TaskComments from "./TaskComments"; // <-- 새 컴포넌트 임포트
-import "./styles/TaskComments.css"; // <-- 새 CSS 임포트
+import TaskComments from "./TaskComments";
+import "./styles/TaskComments.css";
 
-//const formatDate = (dateString) => {
-//if (!dateString) return "없음";
-//const date = new Date(dateString);
-//return isNaN(date) ? "없음" : date.toLocaleDateString("ko-KR");
-//};
-
+// d-day 계산 함수
 const calculateDDay = (endDate) => {
   if (!endDate) return "없음";
   const target = new Date(endDate);
@@ -23,6 +18,7 @@ const calculateDDay = (endDate) => {
   return diff > 0 ? `D-${diff}` : diff === 0 ? "D-DAY" : `D+${Math.abs(diff)}`;
 };
 
+// 프로젝트 생성 모달
 const ProjectModal = ({ isOpen, onClose, onSubmit }) => {
   const [projectName, setProjectName] = useState("");
   const [dDay, setDDay] = useState("");
@@ -96,6 +92,72 @@ const ProjectModal = ({ isOpen, onClose, onSubmit }) => {
             </button>
             <button type="submit" className="modal-submit-btn">
               생성
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// 프로젝트 수정 모달
+const EditProjectModal = ({ isOpen, onClose, onSubmit, initialData }) => {
+  const [projectName, setProjectName] = useState(initialData?.project_name || "");
+  const [dDay, setDDay] = useState(initialData?.end_date || "");
+  const [content, setContent] = useState(initialData?.content || "");
+
+  useEffect(() => {
+    setProjectName(initialData?.project_name || "");
+    setDDay(initialData?.end_date || "");
+    setContent(initialData?.content || "");
+  }, [initialData]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (projectName.trim()) {
+      onSubmit({ name: projectName, end_date: dDay, content });
+      onClose();
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-content">
+        <h2>프로젝트 수정</h2>
+        <form onSubmit={handleSubmit}>
+          <div className="modal-input-group">
+            <label>프로젝트 이름</label>
+            <input
+              type="text"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              required
+            />
+          </div>
+          <div className="modal-input-group">
+            <label>D-Day</label>
+            <input
+              type="date"
+              value={dDay}
+              onChange={(e) => setDDay(e.target.value)}
+            />
+          </div>
+          <div className="modal-input-group">
+            <label>프로젝트 설명</label>
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows="4"
+            />
+          </div>
+          <div className="modal-buttons">
+            <button type="button" onClick={onClose} className="modal-cancel-btn">
+              취소
+            </button>
+            <button type="submit" className="modal-submit-btn">
+              수정
             </button>
           </div>
         </form>
@@ -222,6 +284,8 @@ const MainPage = () => {
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState(null);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [isAlarmMenuOpen, setIsAlarmMenuOpen] = useState(false);
   const [alarms, setAlarms] = useState([]);
@@ -244,6 +308,38 @@ const MainPage = () => {
   const [taskComments, setTaskComments] = useState({});
   const [isLoadingCommentsTask, setIsLoadingCommentsTask] = useState({});
   const [taskCommentCounts, setTaskCommentCounts] = useState({});
+
+// 프로젝트 수정 모달 열기
+const openEditModal = (project) => {
+  setEditingProject(project); // 선택한 프로젝트 정보 저장
+  setIsEditModalOpen(true);   // 수정 모달 열기
+};
+
+// 프로젝트 수정 모달 닫기
+const closeEditModal = () => {
+  setIsEditModalOpen(false);
+  setEditingProject(null);    // 편집 상태 초기화
+};
+
+// 프로젝트 수정 핸들
+const handleEditProject = async (projectData) => {
+  if (!editingProject || !editingProject.project_id) return;
+
+  try {
+    const response = await axios.put(`/api/projects/${editingProject.project_id}`, {
+      name: projectData.name,
+      content: projectData.content,
+      end_date: projectData.end_date,
+    });
+    alert(response.data.message);
+    await fetchProjects();
+    closeEditModal();
+  } catch (err) {
+    console.error("프로젝트 수정 실패:", err);
+    alert("프로젝트 수정 중 오류가 발생했습니다.");
+  }
+};
+
 
   const formatDate = (dateString) => {
     if (!dateString) return "없음";
@@ -916,13 +1012,7 @@ const MainPage = () => {
                       >
                         로그
                       </button>
-                      {/* 알람 탭은 전역으로 처리하므로 프로젝트별 알람 탭은 제거 가능 */}
-                      {/* <button
-                        className={`action-btn quaternary ${selectedTab === "알람" ? "active" : ""}`}
-                        onClick={() => setSelectedTab("알람")}
-                      >
-                        알람
-                      </button> */}
+
                       <button
                         className={`action-btn quinary ${
                           selectedTab === "사용자" ? "active" : ""
@@ -982,6 +1072,13 @@ const MainPage = () => {
                           <strong>프로젝트 설명:</strong>{" "}
                           {selectedProject.content || "설명이 없습니다."}
                         </p>
+                        <button
+                          className="edit-project-btn"
+                          style={{ marginLeft: "10px" }}
+                          onClick={() => openEditModal(selectedProject)}
+                        >
+                          프로젝트 수정
+                        </button>
                       </div>
                     )}
                     {selectedTab === "업무" && (
@@ -1259,6 +1356,12 @@ const MainPage = () => {
         isOpen={isModalOpen}
         onClose={closeModal}
         onSubmit={handleCreateProject}
+      />
+      <EditProjectModal
+        isOpen={isEditModalOpen}
+        onClose={closeEditModal}
+        onSubmit={handleEditProject}
+        initialData={editingProject}
       />
     </div>
   );
