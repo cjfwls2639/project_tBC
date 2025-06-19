@@ -266,9 +266,7 @@ app.post("/api/projects", async (req, res) => {
       projectId,
       null,
       "PROJECT_CREATED",
-      {
-        projectName: name,
-      }
+      JSON.stringify({ projectName: name })
     );
 
     await connection.commit();
