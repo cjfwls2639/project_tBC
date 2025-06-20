@@ -1650,10 +1650,14 @@ const MainPage = () => {
                                 <span>
                                   ID: {pUser.user_id} - 이름: {pUser.username} - 역할: {pUser.role_in_project}
                                   {/* 생성자(Creator) 표시 */}
-                                  {selectedProject?.created_by === pUser.user_id && <strong style={{color: 'purple', marginLeft: '5px'}}>(생성자)</strong>}
+                                  {selectedProject?.created_by === pUser.user_id && (
+                                    <span title="프로젝트 생성자" style={{ marginLeft: '8px', fontSize: '1.2em' }}>
+                                      👑
+                                    </span>
+                                  )}
                                 </span>
                                 
-                                <div style={{marginLeft: 'auto', display: 'flex', gap: '10px'}}>
+                                <div style={{display: 'flex', gap: '10px'}}>
                                   {/* --- 버튼 렌더링 조건 --- */}
 
                                   {/* '매니저로 지정' 버튼 */}
