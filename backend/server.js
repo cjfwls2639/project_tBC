@@ -1116,10 +1116,15 @@ app.post("/api/tasks/:taskId/assignees", async (req, res) => {
       [numericTaskId, userIdToAdd]
     );
 
-    // 5. (선택) 활동 로그 기록
-    logActivity(requesterUserId, projectId, numericTaskId, "ASSIGNEE_ADDED", {
-      assigneeUsername: usernameToAdd,
-    }).catch((logErr) =>
+    // 5. 활동 로그 기록
+    await logActivity(
+      connection,
+      numericRequesterUserId,
+      projectId,
+      numericTaskId,
+      "ASSIGNEE_ADDED",
+      { assigneeUsername: usernameToAdd }
+    ).catch((logErr) =>
       console.error("활동 로그 기록 실패 (담당자 추가):", logErr)
     );
 
@@ -1144,25 +1149,10 @@ app.delete("/api/tasks/:taskId/assignees/:userIdToRemove", async (req, res) => {
   const { taskId, userIdToRemove } = req.params;
   const requesterUserIdValue = req.query.requesterUserId;
 
-  console.log("DELETE /assignees - Received raw query object:", req.query);
-  console.log(
-    "DELETE /assignees - Extracted requesterUserIdValue:",
-    requesterUserIdValue
-  );
-
-  if (!requesterUserIdValue) {
-    // 이제 실제 값으로 검사
-    console.error(
-      "DELETE /assignees - requesterUserIdValue is missing from query"
-    );
-    return res
-      .status(401)
-      .json({ error: "요청자 ID(requesterUserId)가 필요합니다." });
-  }
-
+  // ... (기존 ID 유효성 검사 및 파싱) ...
   const numericTaskId = parseInt(taskId, 10);
   const numericUserIdToRemove = parseInt(userIdToRemove, 10);
-  const numericRequesterUserId = parseInt(requesterUserIdValue, 10); // 추출한 값을 숫자로 변환
+  const numericRequesterUserId = parseInt(requesterUserIdValue, 10);
 
   if (
     isNaN(numericTaskId) ||
@@ -1174,16 +1164,18 @@ app.delete("/api/tasks/:taskId/assignees/:userIdToRemove", async (req, res) => {
 
   let connection;
   try {
+    console.log("DELETE /assignees - Acquiring connection...");
     connection = await db.promise().getConnection();
+    console.log("DELETE /assignees - Connection acquired. Beginning transaction...");
     await connection.beginTransaction();
+    console.log("DELETE /assignees - Transaction begun.");
 
-    // 1. 요청자가 해당 업무가 속한 프로젝트의 매니저인지 확인
+    console.log("DELETE /assignees - Checking manager role...");
     const [taskProjectRows] = await connection.execute(
       "SELECT project_id FROM tasks WHERE task_id = ?",
       [numericTaskId]
     );
     if (taskProjectRows.length === 0) {
-      // ... (에러 처리)
       await connection.rollback();
       connection.release();
       return res.status(404).json({ error: "해당 업무를 찾을 수 없습니다." });
@@ -1192,55 +1184,79 @@ app.delete("/api/tasks/:taskId/assignees/:userIdToRemove", async (req, res) => {
 
     const [managerCheckRows] = await connection.execute(
       "SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?",
-      [projectId, numericRequesterUserId] // numericRequesterUserId 사용
+      [projectId, numericRequesterUserId]
     );
-
     if (
       managerCheckRows.length === 0 ||
       managerCheckRows[0].role_in_project !== "manager"
     ) {
-      // ... (권한 없음 처리)
+      // 일반 멤버는 누구도 제외할 수 없음 (자기 자신 포함)
       await connection.rollback();
       connection.release();
       return res
         .status(403)
         .json({ error: "담당자를 제외할 권한이 없습니다. (매니저 전용)" });
     }
+    console.log("DELETE /assignees - Manager role checked.");
+
+    // --- 추가 검사: 매니저가 자기 자신을 제외하려 하고, 유일한 담당자인 경우 ---
+    if (numericRequesterUserId === numericUserIdToRemove) {
+      console.log("DELETE /assignees - Checking if self-removal and only assignee...");
+      const [assigneeCountRows] = await connection.execute(
+        "SELECT COUNT(*) as count FROM task_assignees WHERE task_id = ?",
+        [numericTaskId]
+      );
+      const assigneeCount = assigneeCountRows[0].count;
+
+      if (assigneeCount <= 1) {
+        await connection.rollback();
+        connection.release();
+        return res.status(400).json({
+          error:
+            "자기 자신을 제외할 수 없습니다. 업무에는 최소 한 명의 담당자가 필요합니다. 다른 담당자를 먼저 지정해주세요.",
+        });
+      }
+      console.log("DELETE /assignees - Self-removal check done.");
+    }
 
     // 2. 실제로 해당 사용자가 업무의 담당자인지 확인
+    console.log("DELETE /assignees - Checking if user is assignee...");
     const [assigneeCheckRows] = await connection.execute(
       "SELECT user_id FROM task_assignees WHERE task_id = ? AND user_id = ?",
       [numericTaskId, numericUserIdToRemove]
     );
     if (assigneeCheckRows.length === 0) {
-      // ... (담당자 아님 처리)
       await connection.rollback();
       connection.release();
       return res
         .status(404)
         .json({ error: "해당 사용자는 이 업무의 담당자가 아닙니다." });
     }
+    console.log("DELETE /assignees - Assignee check done.");
 
     // 3. task_assignees 테이블에서 담당자 제외
+    console.log("DELETE /assignees - Deleting assignee...");
     const [deleteResult] = await connection.execute(
       "DELETE FROM task_assignees WHERE task_id = ? AND user_id = ?",
       [numericTaskId, numericUserIdToRemove]
     );
-
     if (deleteResult.affectedRows === 0) {
-      // ... (삭제 안됨 처리)
       await connection.rollback();
       connection.release();
       return res
         .status(404)
         .json({ error: "제외할 담당자를 찾을 수 없거나 이미 제외되었습니다." });
     }
+    console.log("DELETE /assignees - Assignee deleted.");
 
-    // 4. (선택) 활동 로그 기록
+    // 4. 활동 로그 기록
+    console.log("DELETE /assignees - Logging activity...");
     const [removedUserRows] = await connection.execute(
-      "SELECT username FROM users WHERE user_id = ?",
+      "SELECT username FROM users WHERE user_id = ?", 
       [numericUserIdToRemove]
     );
+    console.log("DELETE /assignees - Activity logged.");
+
     const removedUsername =
       removedUserRows.length > 0
         ? removedUserRows[0].username
@@ -1248,7 +1264,7 @@ app.delete("/api/tasks/:taskId/assignees/:userIdToRemove", async (req, res) => {
 
     // logActivity 함수 호출 시 첫 번째 인자로 현재 트랜잭션 connection 객체를 전달
     await logActivity(
-      connection, // <--- 수정된 부분: 현재 트랜잭션의 connection 객체 전달
+      connection,
       numericRequesterUserId,
       projectId,
       numericTaskId,
@@ -1257,11 +1273,12 @@ app.delete("/api/tasks/:taskId/assignees/:userIdToRemove", async (req, res) => {
     ).catch((logErr) =>
       console.error("활동 로그 기록 실패 (담당자 제외):", logErr)
     );
-
+    console.log("DELETE /assignees - Committing transaction...");
     await connection.commit();
     res.json({
       message: `사용자(ID: ${numericUserIdToRemove})가 업무 담당자에서 제외되었습니다.`,
     });
+    console.log("DELETE /assignees - Transaction committed.");
   } catch (err) {
     if (connection) await connection.rollback();
     console.error(
