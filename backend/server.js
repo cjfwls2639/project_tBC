@@ -1391,13 +1391,28 @@ app.get("/api/projects/:projectId/users", async (req, res) => {
   const { projectId } = req.params;
 
   try {
-    const [rows] = await db.promise().query(
-      `SELECT u.user_id, u.username, u.email, pm.role_in_project
-       FROM project_members pm
-       JOIN users u ON pm.user_id = u.user_id
-       WHERE pm.project_id = ?`,
-      [projectId]
-    );
+    // projects 테이블을 JOIN하고, ORDER BY에 생성자 우선 정렬 조건을 추가합니다.
+    const sql = `
+      SELECT u.user_id, u.username, u.email, pm.role_in_project
+      FROM project_members pm
+      JOIN users u ON pm.user_id = u.user_id
+      JOIN projects p ON pm.project_id = p.project_id
+      WHERE pm.project_id = ?
+      ORDER BY
+        -- 1순위: 생성자인지 여부 (생성자일 경우 1, 아닐 경우 2)
+        CASE
+          WHEN p.created_by = u.user_id THEN 1
+          ELSE 2
+        END,
+        -- 2순위: 역할 (매니저일 경우 1, 멤버일 경우 2)
+        CASE
+          WHEN pm.role_in_project = 'manager' THEN 1
+          ELSE 2
+        END,
+        -- 3순위: 사용자 이름 오름차순
+        u.username ASC`;
+        
+    const [rows] = await db.promise().query(sql, [projectId]);
 
     res.json(rows);
   } catch (err) {
