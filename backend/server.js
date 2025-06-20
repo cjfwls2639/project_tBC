@@ -17,6 +17,7 @@ const GOOGLE_CLIENT_ID =
 const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 // 활동 로그 기록 함수
+// 활동 로그 기록 함수 (오류 수정 버전)
 const logActivity = async (
   db_connection,
   userId,
@@ -27,14 +28,20 @@ const logActivity = async (
 ) => {
   const sql =
     "INSERT INTO activity_logs (user_id, project_id, task_id, action_type, details) VALUES (?, ?, ?, ?, ?)";
-  const params = [userId, projectId, taskId, actionType, JSON.stringify(details)];
+  
+  // 파라미터를 5개 순서대로 배열에 담습니다.
+  const params = [
+    userId,
+    projectId,
+    taskId, // taskId는 null일 수 있습니다.
+    actionType,
+    JSON.stringify(details), // details 객체를 여기서 문자열로 변환합니다.
+  ];
+
   try {
+    // query 함수는 sql과 params 두 개의 인자만 받습니다.
     await db_connection.query(sql, params);
-    console.log(
-      `Activity logged: ${actionType} for user ${userId}, project ${projectId}, task ${
-        taskId || "N/A"
-      }`
-    );
+    console.log(`Activity logged: ${actionType}`);
   } catch (err) {
     console.error("Error logging activity:", err);
   }
@@ -261,7 +268,7 @@ app.post("/api/projects", async (req, res) => {
       projectId,
       null,
       "PROJECT_CREATED",
-      JSON.stringify({ projectName: name })
+      { projectName: name } 
     );
 
     await connection.commit();
@@ -378,10 +385,10 @@ app.put("/api/projects/:id", (req, res) => {
   });
 });
 
-// 2.5. 프로젝트 삭제 (DELETE) - 매니저 권한으로 변경
+// 2.5. 프로젝트 삭제 (DELETE) - 연관 데이터 모두 삭제하도록 수정
 app.delete("/api/projects/:id", async (req, res) => {
-  const { id } = req.params; // 삭제할 프로젝트 ID
-  const { userId } = req.body; // 요청자 ID
+  const { id: projectId } = req.params; // 변수명을 projectId로 명확하게 변경
+  const { userId } = req.body;
 
   if (!userId) {
     return res.status(401).json({ error: "인증되지 않은 사용자입니다." });
@@ -391,53 +398,51 @@ app.delete("/api/projects/:id", async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // 1. 요청자가 해당 프로젝트의 매니저인지 확인 (권한 로직 변경)
+    // 1. 권한 확인 (매니저 여부)
     const [memberRows] = await connection.query(
       "SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?",
-      [id, userId]
+      [projectId, userId]
     );
-
-    // 2. 매니저가 아니면 삭제 권한 없음
     if (memberRows.length === 0 || memberRows[0].role_in_project !== 'manager') {
       await connection.rollback();
-      return res
-        .status(403)
-        .json({ error: "프로젝트 매니저만 삭제할 수 있습니다." });
+      return res.status(403).json({ error: "프로젝트 매니저만 삭제할 수 있습니다." });
     }
 
-    // 3. 로그 기록을 위해 삭제 전에 프로젝트 이름을 조회
-    const [projectDetails] = await connection.query(
-        "SELECT project_name FROM projects WHERE project_id = ?",
-        [id]
-    );
-    if (projectDetails.length === 0) {
-        await connection.rollback();
-        return res.status(404).json({ message: "삭제할 프로젝트 정보를 찾을 수 없습니다." });
+    // --- 삭제 순서가 매우 중요합니다 ---
+    // 프로젝트에 속한 모든 업무 ID를 가져옵니다.
+    const [tasksToDelete] = await connection.query("SELECT task_id FROM tasks WHERE project_id = ?", [projectId]);
+    const taskIds = tasksToDelete.map(t => t.task_id);
+
+    if (taskIds.length > 0) {
+      // 2. 업무에 연결된 자식 데이터 삭제 (comments, task_assignees)
+      await connection.query("DELETE FROM comments WHERE task_id IN (?)", [taskIds]);
+      await connection.query("DELETE FROM task_assignees WHERE task_id IN (?)", [taskIds]);
+      
+      // 3. 업무(tasks) 자체를 삭제
+      await connection.query("DELETE FROM tasks WHERE project_id = ?", [projectId]);
     }
 
-    // 4. 활동 로그 기록
-    await logActivity(connection, userId, id, null, "PROJECT_DELETED", {
-      projectName: projectDetails[0].project_name,
-    });
+    // 4. 프로젝트에 연결된 다른 자식 데이터 삭제 (project_members, activity_logs)
+    // activity_logs와 project_members는 이미 ON DELETE CASCADE 이므로, 아래 두 줄은 생략 가능하나 명시적으로 실행해도 무방합니다.
+    await connection.query("DELETE FROM activity_logs WHERE project_id = ?", [projectId]);
+    await connection.query("DELETE FROM project_members WHERE project_id = ?", [projectId]);
 
-    // 5. 프로젝트 삭제 실행
+    // 5. 모든 자식 데이터가 정리된 후, 최종적으로 프로젝트를 삭제
     const [deleteResult] = await connection.query(
       "DELETE FROM projects WHERE project_id = ?",
-      [id]
+      [projectId]
     );
 
     if (deleteResult.affectedRows === 0) {
-      await connection.rollback();
-      return res
-        .status(404)
-        .json({ message: "프로젝트를 찾을 수 없거나 이미 삭제되었습니다." });
+      throw new Error("삭제할 프로젝트를 찾지 못했습니다.");
     }
 
     await connection.commit();
-    res.json({ message: "프로젝트가 성공적으로 삭제되었습니다." });
+    res.json({ message: "프로젝트와 관련된 모든 데이터가 성공적으로 삭제되었습니다." });
+
   } catch (err) {
     await connection.rollback();
-    console.error("Error deleting project:", err);
+    console.error("Error deleting project and its related data:", err);
     res.status(500).json({ error: "프로젝트 삭제 중 오류가 발생했습니다." });
   } finally {
     connection.release();
@@ -677,6 +682,15 @@ app.post("/api/projects/:projectId/tasks", async (req, res) => {
       );
     });
 
+    await logActivity(
+      connection,
+      created_by_user_id,
+      parseInt(projectId),
+      newTaskId,
+      "TASK_CREATED",
+      { taskName: title }
+    );
+
     // 6. 모든 DB 작업 성공 시 트랜잭션 커밋
     await connection.commit();
 
@@ -768,210 +782,87 @@ app.get("/api/tasks/:taskId", async (req, res) => {
 });
 
 // 5.4. 업무 정보 수정 (UPDATE)
-app.put("/api/tasks/:taskId", (req, res) => {
+app.put("/api/tasks/:taskId", async (req, res) => {
   const { taskId } = req.params;
-  const { title, content, due_date, status } = req.body;
+  const { title, content, due_date, status, requesterId } = req.body; // 요청자 ID 추가
 
-  // DB 컬럼이 숫자형이라면 taskId를 숫자로 변환하는 것이 좋습니다.
-  const numericTaskId = parseInt(taskId, 10);
-  if (isNaN(numericTaskId)) {
-    return res.status(400).json({ error: "잘못된 task ID 형식입니다." });
+  if (!requesterId) {
+    return res.status(401).json({ error: "요청자 ID가 필요합니다." });
   }
 
-  const sql = `
-        UPDATE tasks SET
-        task_name = ?, 
-        content = ?, 
-        due_date = ?, 
-        status = ?
-        WHERE task_id = ?
-    `;
-  db.query(
-    sql,
-    [title, content, due_date, status, numericTaskId],
-    (err, result) => {
-      if (err) {
-        console.error("업무 수정 중 오류 발생:", err);
-        // 실제 SQL 오류에 대한 자세한 정보를 로깅
-        console.error("SQL 오류 코드:", err.code);
-        console.error("SQL 오류 메시지:", err.sqlMessage);
-        return res.status(500).json({
-          error: "업무 수정 중 오류가 발생했습니다.",
-          details: err.sqlMessage || err.message,
-        });
-      }
-      if (result.affectedRows === 0) {
-        // 이 시점에서는 task_id를 찾지 못했거나,
-        // 전송된 데이터가 기존 데이터와 동일했음을 의미합니다.
-        // 더 구체적인 오류를 위해 task_id가 존재하는지 SELECT로 미리 확인할 수도 있지만, 이 방법도 괜찮습니다.
-        return res.status(404).json({
-          message:
-            "업무를 찾을 수 없거나 변경 사항이 없습니다. (ID: " +
-            numericTaskId +
-            ")",
-        });
-      }
-      res.json({ message: "업무가 성공적으로 수정되었습니다." });
+  const connection = await db.promise().getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [taskRows] = await connection.query("SELECT project_id FROM tasks WHERE task_id = ?", [taskId]);
+    if(taskRows.length === 0) {
+        return res.status(404).json({ message: "수정할 업무를 찾을 수 없습니다." });
     }
-  );
-});
+    const projectId = taskRows[0].project_id;
 
-// 5.5. 업무 삭제 (DELETE) - 관리자 권한 확인 및 참조 데이터 삭제 로직 추가
-app.delete("/api/tasks/:id", (req, res) => {
-  const { userId } = req.body;
-  const { id: taskId } = req.params;
+    const sql = "UPDATE tasks SET task_name = ?, content = ?, due_date = ?, status = ? WHERE task_id = ?";
+    const [updateResult] = await connection.query(sql, [title, content, due_date, status, taskId]);
 
-  if (!userId) {
-    return res.status(401).json({ error: "인증되지 않은 사용자입니다." });
-  }
-
-  const numericTaskId = parseInt(taskId, 10);
-  if (isNaN(numericTaskId)) {
-    return res.status(400).json({ error: "잘못된 업무 ID 형식입니다." });
-  }
-  db.getConnection((err, connection) => {
-    if (err) {
-      console.error("Error getting database connection:", err);
-      return res.status(500).json({
-        error: "데이터베이스 연결을 가져오는 중 오류가 발생했습니다.",
+    if (updateResult.affectedRows > 0) {
+      // 활동 로그 기록 추가
+      await logActivity(connection, requesterId, projectId, taskId, "TASK_UPDATED", {
+        updatedTaskName: title,
+        newStatus: status,
       });
     }
 
-    // 1. [권한 검사]
-    const authSql = `
-      SELECT pm.role_in_project
-      FROM tasks AS t
-      JOIN project_members AS pm ON t.project_id = pm.project_id
-      WHERE t.task_id = ? AND pm.user_id = ?;
-    `;
+    await connection.commit();
+    res.json({ message: "업무가 성공적으로 수정되었습니다." });
+  } catch (err) {
+    await connection.rollback();
+    console.error("업무 수정 중 오류 발생:", err);
+    res.status(500).json({ error: "업무 수정 중 오류가 발생했습니다."});
+  } finally {
+    connection.release();
+  }
+});
+app.delete("/api/tasks/:id", async (req, res) => {
+  const { userId } = req.body;
+  const { id: taskId } = req.params;
 
-    connection.query(
-      authSql,
-      [numericTaskId, userId],
-      (authErr, authResults) => {
-        if (authErr) {
-          connection.release(); // 사용한 연결 반환
-          console.error("Error checking authorization:", authErr);
-          return res
-            .status(500)
-            .json({ error: "권한 확인 중 오류가 발생했습니다." });
-        }
+  if (!userId) return res.status(401).json({ error: "인증되지 않은 사용자입니다." });
 
-        if (
-          authResults.length === 0 ||
-          authResults[0].role_in_project !== "manager"
-        ) {
-          connection.release(); // 사용한 연결 반환
-          return res
-            .status(403)
-            .json({ error: "업무를 삭제할 권한이 없습니다. (관리자 전용)" });
-        }
+  const numericTaskId = parseInt(taskId, 10);
+  if (isNaN(numericTaskId)) return res.status(400).json({ error: "잘못된 업무 ID 형식입니다." });
+  
+  const connection = await db.promise().getConnection();
+  try {
+    await connection.beginTransaction();
 
-        // 2. [삭제 실행] 권한이 확인되면, 트랜잭션 시작 (가져온 connection 객체 사용)
-        connection.beginTransaction((transactionErr) => {
-          if (transactionErr) {
-            connection.release(); // 사용한 연결 반환
-            console.error("Error starting transaction:", transactionErr);
-            return res
-              .status(500)
-              .json({ error: "트랜잭션 시작 중 오류가 발생했습니다." });
-          }
+    const [taskRows] = await connection.query(
+        `SELECT t.project_id, t.task_name, pm.role_in_project
+         FROM tasks t JOIN project_members pm ON t.project_id = pm.project_id
+         WHERE t.task_id = ? AND pm.user_id = ?`, [numericTaskId, userId]);
 
-          // 2.1. task_assignees 테이블에서 관련 데이터 삭제
-          const deleteAssigneesSql =
-            "DELETE FROM task_assignees WHERE task_id = ?";
-          connection.query(
-            deleteAssigneesSql,
-            [numericTaskId],
-            (assigneesErr, assigneesResult) => {
-              if (assigneesErr) {
-                return connection.rollback(() => {
-                  connection.release(); // 사용한 연결 반환
-                  console.error("Error deleting task assignees:", assigneesErr);
-                  res.status(500).json({
-                    error: "업무 담당자 정보 삭제 중 오류가 발생했습니다.",
-                    details: assigneesErr.message,
-                  });
-                });
-              }
+    if (taskRows.length === 0 || taskRows[0].role_in_project !== 'manager') {
+      await connection.rollback();
+      return res.status(403).json({ error: "업무를 삭제할 권한이 없습니다." });
+    }
+    const { project_id, task_name } = taskRows[0];
 
-              // 2.2. comments 테이블에서 관련 데이터 삭제 (새로 추가)
-              const deleteCommentsSql =
-                "DELETE FROM comments WHERE task_id = ?";
-              connection.query(
-                deleteCommentsSql,
-                [numericTaskId],
-                (commentsErr, commentsResult) => {
-                  if (commentsErr) {
-                    return connection.rollback(() => {
-                      connection.release();
-                      console.error("Error deleting comments:", commentsErr);
-                      res.status(500).json({
-                        error: "업무 관련 댓글 삭제 중 오류가 발생했습니다.",
-                        details: commentsErr.message,
-                      });
-                    });
-                  }
-                  console.log(
-                    `Deleted ${commentsResult.affectedRows} comments for task ${numericTaskId}`
-                  );
+    // 활동 로그 기록 (삭제 전에!)
+    await logActivity(connection, userId, project_id, numericTaskId, "TASK_DELETED", {
+        deletedTaskName: task_name,
+    });
 
-                  // 2.3. tasks 테이블에서 업무 데이터 삭제
-                  const deleteTaskSql = "DELETE FROM tasks WHERE task_id = ?";
-                  connection.query(
-                    deleteTaskSql,
-                    [numericTaskId],
-                    (taskErr, taskResult) => {
-                      if (taskErr) {
-                        return connection.rollback(() => {
-                          connection.release(); // 사용한 연결 반환
-                          console.error("Error deleting task:", taskErr);
-                          res.status(500).json({
-                            error: "업무 삭제 중 오류가 발생했습니다.",
-                            details: taskErr.message,
-                          });
-                        });
-                      }
-
-                      if (taskResult.affectedRows === 0) {
-                        return connection.rollback(() => {
-                          connection.release(); // 사용한 연결 반환
-                          res.status(404).json({
-                            message: "삭제할 업무를 찾을 수 없습니다.",
-                          });
-                        });
-                      }
-
-                      // 모든 삭제 작업이 성공하면 트랜잭션 커밋
-                      connection.commit((commitErr) => {
-                        if (commitErr) {
-                          return connection.rollback(() => {
-                            connection.release(); // 사용한 연결 반환
-                            console.error(
-                              "Error committing transaction:",
-                              commitErr
-                            );
-                            res.status(500).json({
-                              error: "트랜잭션 커밋 중 오류가 발생했습니다.",
-                            });
-                          });
-                        }
-                        connection.release(); // 사용한 연결 반환
-                        res.json({
-                          message:
-                            "업무와 관련 담당자 정보가 성공적으로 삭제되었습니다.",
-                        });
-                      });
-                    }
-                  );
-                }
-              );
-            }
-          );
-        });
-      }
-    );
-  });
+    await connection.query("DELETE FROM comments WHERE task_id = ?", [numericTaskId]);
+    await connection.query("DELETE FROM task_assignees WHERE task_id = ?", [numericTaskId]);
+    await connection.query("DELETE FROM tasks WHERE task_id = ?", [numericTaskId]);
+    
+    await connection.commit();
+    res.json({ message: "업무와 관련 데이터가 성공적으로 삭제되었습니다." });
+  } catch(err) {
+    await connection.rollback();
+    console.error("Error deleting task:", err);
+    res.status(500).json({ error: "업무 삭제 중 오류가 발생했습니다." });
+  } finally {
+    connection.release();
+  }
 });
 
 // --- 6. 업무 담당자 API (Task Assignees) ---
@@ -1448,50 +1339,41 @@ app.get("/api/activity_logs", async (req, res) => {
 // 사용자 추가
 app.post("/api/projects/:projectId/users", async (req, res) => {
   const { projectId } = req.params;
-  const { username } = req.body;
+  const { username, requesterId } = req.body; // 요청자 ID 추가
 
-  if (!username) {
-    return res.status(400).json({ error: "username이 필요합니다." });
-  }
+  if (!username) return res.status(400).json({ error: "username이 필요합니다." });
+  if (!requesterId) return res.status(401).json({ error: "요청자 ID가 필요합니다." });
 
+  const connection = await db.promise().getConnection();
   try {
-    // 1. username으로 사용자 조회
-    const [users] = await db
-      .promise()
-      .query("SELECT user_id FROM users WHERE username = ?", [username]);
-
-    if (users.length === 0) {
-      return res.status(404).json({ error: "해당 사용자를 찾을 수 없습니다." });
-    }
-
+    await connection.beginTransaction();
+    
+    const [users] = await connection.query("SELECT user_id FROM users WHERE username = ?", [username]);
+    if (users.length === 0) throw new Error("해당 사용자를 찾을 수 없습니다.");
+    
     const userId = users[0].user_id;
 
-    // 2. 이미 프로젝트에 포함됐는지 확인
-    const [exists] = await db
-      .promise()
-      .query(
-        "SELECT * FROM project_members WHERE project_id = ? AND user_id = ?",
-        [projectId, userId]
-      );
+    const [exists] = await connection.query("SELECT id FROM project_members WHERE project_id = ? AND user_id = ?", [projectId, userId]);
+    if (exists.length > 0) throw new Error("이미 프로젝트에 추가된 사용자입니다.");
 
-    if (exists.length > 0) {
-      return res
-        .status(409)
-        .json({ message: "이미 프로젝트에 추가된 사용자입니다." });
-    }
+    await connection.query("INSERT INTO project_members (project_id, user_id) VALUES (?, ?)", [projectId, userId]);
 
-    // 3. 사용자 추가
-    await db
-      .promise()
-      .query(
-        "INSERT INTO project_members (project_id, user_id, role_in_project) VALUES (?, ?, 'member')",
-        [projectId, userId]
-      );
-
+    // 활동 로그 기록 추가
+    await logActivity(connection, requesterId, projectId, null, "MEMBER_ADDED", {
+        addedUsername: username
+    });
+    
+    await connection.commit();
     res.status(201).json({ message: "사용자 추가 성공!" });
   } catch (err) {
+    await connection.rollback();
+    // 에러 메시지에 따라 다른 상태 코드 반환
+    if(err.message.includes("찾을 수 없습니다")) return res.status(404).json({ error: err.message });
+    if(err.message.includes("이미 추가된")) return res.status(409).json({ error: err.message });
     console.error("사용자 추가 중 오류:", err);
-    res.status(500).json({ error: "사용자 추가 중 오류가 발생했습니다." });
+    res.status(500).json({ error: "사용자 추가 중 서버 오류가 발생했습니다." });
+  } finally {
+      connection.release();
   }
 });
 
@@ -1610,44 +1492,33 @@ app.put("/api/projects/:projectId/members/:memberId", async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const [requesterRows] = await connection.query(
-      "SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?",
-      [projectId, requesterId]
-    );
-
-    if (requesterRows.length === 0) {
-      return res.status(404).json({ error: "요청자 정보를 찾을 수 없습니다." });
-    }
-
-    const requesterRole = requesterRows[0].role_in_project;
-
-    // 1. 권한 검사: 오직 매니저만 역할을 변경할 수 있음
-    if (requesterRole !== 'manager') {
+    const [requesterRows] = await connection.query("SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?", [projectId, requesterId]);
+    if (requesterRows.length === 0 || requesterRows[0].role_in_project !== 'manager') {
       return res.status(403).json({ error: "멤버의 역할을 변경할 권한이 없습니다. (매니저 전용)" });
     }
 
-    // 2. 강등 시 보호 로직
     if (newRole === 'member') {
-      // 자기 자신은 강등 불가
-      if (parseInt(requesterId) === parseInt(memberId)) {
-        return res.status(400).json({ error: "자기 자신을 강등시킬 수 없습니다." });
-      }
-
-      // 프로젝트 원본 생성자는 강등시키지 못하도록 보호
+      if (parseInt(requesterId) === parseInt(memberId)) return res.status(400).json({ error: "자기 자신을 강등시킬 수 없습니다." });
       const [projectRows] = await connection.query("SELECT created_by FROM projects WHERE project_id = ?", [projectId]);
       if (projectRows.length > 0 && projectRows[0].created_by === parseInt(memberId)) {
-          return res.status(403).json({ error: "프로젝트 생성자는 강등시킬 수 없습니다."});
+        return res.status(403).json({ error: "프로젝트 생성자는 강등시킬 수 없습니다."});
       }
     }
+    
+    // 로그 기록을 위해 대상 유저 정보 조회
+    const [targetUser] = await connection.query("SELECT username FROM users WHERE user_id = ?", [memberId]);
+    if (targetUser.length === 0) {
+      return res.status(404).json({ error: "역할을 변경할 사용자를 찾을 수 없습니다." });
+    }
 
-    // 3. 대상 멤버의 역할 업데이트 실행
-    const [updateResult] = await connection.query(
-      "UPDATE project_members SET role_in_project = ? WHERE project_id = ? AND user_id = ?",
-      [newRole, projectId, memberId]
-    );
+    const [updateResult] = await connection.query("UPDATE project_members SET role_in_project = ? WHERE project_id = ? AND user_id = ?", [newRole, projectId, memberId]);
 
-    if (updateResult.affectedRows === 0) {
-      return res.status(404).json({ message: "역할을 변경할 사용자를 찾을 수 없습니다." });
+    if (updateResult.affectedRows > 0) {
+      // 활동 로그 기록 추가
+      await logActivity(connection, requesterId, projectId, null, "MEMBER_ROLE_CHANGED", {
+          targetUsername: targetUser[0].username,
+          newRole: newRole
+      });
     }
 
     await connection.commit();

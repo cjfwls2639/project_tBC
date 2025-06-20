@@ -666,7 +666,7 @@ const MainPage = () => {
     try {
       const response = await axios.post(
         `/api/projects/${selectedProjectId}/users`,
-        { username: newUsername } // API 명세에 따라 userId 또는 email 등으로 변경 가능
+         { username: newUsername, requesterId: user.user_id } // API 명세에 따라 userId 또는 email 등으로 변경 가능
       );
       alert(response.data.message || "사용자가 성공적으로 추가되었습니다.");
       setNewUsername(""); // 입력 필드 초기화
@@ -725,6 +725,7 @@ const MainPage = () => {
       content: taskFormData.description,
       status: taskFormData.status,
       due_date: taskFormData.due_date || null,
+      requesterId: user.user_id
     };
     setIsLoadingTasks(true);
     setTaskError(null);
