@@ -5,8 +5,10 @@ import "./styles/MainPage.css";
 import "./styles/Sidebar.css";
 import "./styles/NavigationBar.css";
 import "./styles/MainContent.css";
-import TaskComments from "./TaskComments";
+import TaskComments from "./TaskComments.js";
 import "./styles/TaskComments.css";
+import TaskAssignees from "./TaskAssignees.js";
+import "./styles/TaskAssingees.css";
 
 // d-day 계산 함수
 const calculateDDay = (endDate) => {
@@ -322,6 +324,9 @@ const MainPage = () => {
   const [taskComments, setTaskComments] = useState({});
   const [isLoadingCommentsTask, setIsLoadingCommentsTask] = useState({});
   const [taskCommentCounts, setTaskCommentCounts] = useState({});
+  const [openAssigneesTaskId, setOpenAssigneesTaskId] = useState(null);
+  const [detailedTaskAssignees, setDetailedTaskAssignees] = useState({});
+  const [isLoadingAssignees, setIsLoadingAssignees] = useState({});
 
   // 프로젝트 수정 모달 열기
   const openEditModal = (project) => {
@@ -768,6 +773,122 @@ const MainPage = () => {
     }
   };
 
+  //담당자 관련 함수들
+  const fetchDetailedAssignees = useCallback(async (taskId) => {
+    if (!taskId) {
+      console.warn("fetchDetailedAssignees: taskId is undefined or null"); // taskId 값 확인
+      return;
+    }
+    const apiUrl = `/api/tasks/${taskId}/assignees`; // 요청 URL 로깅
+    console.log(`Fetching assignees from: ${apiUrl}`); // 요청 URL 로깅
+
+    setIsLoadingAssignees((prev) => ({ ...prev, [taskId]: true }));
+    try {
+      const response = await axios.get(apiUrl); // apiUrl 변수 사용
+      setDetailedTaskAssignees((prev) => ({
+        ...prev,
+        [taskId]: response.data,
+      }));
+    } catch (error) {
+      console.error(
+        `Task ID ${taskId}의 담당자 정보 로딩 실패 (URL: ${apiUrl}):`,
+        error
+      ); // 에러 발생 시 URL 함께 로깅
+      console.error(`Task ID ${taskId}의 담당자 정보 로딩 실패:`, error);
+      setDetailedTaskAssignees((prev) => ({ ...prev, [taskId]: [] })); // 실패 시 빈 배열로 설정
+      // 사용자에게 알림을 줄 수도 있습니다.
+      // alert(`담당자 정보 로딩 실패: ${error.response?.data?.message || error.message}`);
+    } finally {
+      setIsLoadingAssignees((prev) => ({ ...prev, [taskId]: false }));
+    }
+  }, []); // axios는 안정적이므로 의존성 배열에 추가하지 않아도 됩니다.
+
+  const toggleAssignees = useCallback(
+    async (taskId) => {
+      const isOpening = openAssigneesTaskId !== taskId;
+      setOpenAssigneesTaskId(isOpening ? taskId : null);
+
+      if (isOpening) {
+        // 아직 해당 업무의 상세 담당자 정보가 로드되지 않았거나, 이전에 로드 실패한 경우
+        if (
+          !detailedTaskAssignees[taskId] ||
+          detailedTaskAssignees[taskId].length === 0
+        ) {
+          await fetchDetailedAssignees(taskId);
+        }
+      }
+    },
+    [openAssigneesTaskId, detailedTaskAssignees, fetchDetailedAssignees]
+  );
+
+  const handleAddAssigneeToTask = async (taskId, usernameToAdd) => {
+    if (!usernameToAdd.trim()) {
+      alert("추가할 담당자의 사용자 이름을 입력해주세요.");
+      return;
+    }
+    // 현재 로그인한 사용자 정보 (user 상태 변수)에서 user_id를 가져옴
+    if (!user || !user.user_id) {
+      alert("담당자를 추가하려면 로그인이 필요합니다. (사용자 정보 없음)"); // 메시지 명확화
+      return;
+    }
+
+    try {
+      await axios.post(
+        `/api/tasks/${taskId}/assignees`,
+        {
+          username: usernameToAdd,
+          requesterUserId: user.user_id, // <--- 수정된 부분: 요청 바디에 requesterUserId 추가
+        }
+        // 만약 서버에서 req.query로 받도록 수정했다면:
+        // { params: { requesterUserId: user.user_id } }
+      );
+      alert(`'${usernameToAdd}' 사용자가 담당자로 추가되었습니다.`);
+      await fetchDetailedAssignees(taskId); // 담당자 목록 새로고침
+    } catch (error) {
+      console.error(`Task ID ${taskId}에 담당자 추가 실패:`, error);
+      alert(
+        `담당자 추가 실패: ${
+          error.response?.data?.error ||
+          error.response?.data?.message ||
+          error.message
+        }`
+        // 서버에서 error 필드로 응답을 보내도록 통일하는 것이 좋음
+      );
+    }
+  };
+
+  const handleRemoveAssigneeFromTask = async (
+    taskId,
+    assigneeUserIdToRemove
+  ) => {
+    if (!assigneeUserIdToRemove) {
+      alert("제외할 담당자 정보가 없습니다.");
+      return;
+    }
+    if (!user || !user.user_id) {
+      alert("담당자를 제외하려면 로그인이 필요합니다.");
+      return;
+    }
+
+    if (window.confirm("이 담당자를 업무에서 제외하시겠습니까?")) {
+      try {
+        await axios.delete(
+          `/api/tasks/${taskId}/assignees/${assigneeUserIdToRemove}`
+        );
+        alert("담당자가 성공적으로 제외되었습니다.");
+        await fetchDetailedAssignees(taskId); // 담당자 목록 새로고침
+      } catch (error) {
+        console.error(
+          `Task ID ${taskId}에서 담당자(ID: ${assigneeUserIdToRemove}) 제외 실패:`,
+          error
+        );
+        alert(
+          `담당자 제외 실패: ${error.response?.data?.message || error.message}`
+        );
+      }
+    }
+  };
+
   // --- 댓글 관련 새 함수들 ---
   const fetchCommentsForTask = useCallback(async (taskId) => {
     if (!taskId) return;
@@ -861,6 +982,97 @@ const MainPage = () => {
     }
   };
 
+  const handlePromoteToManager = async (memberId) => {
+    if (!selectedProjectId || !user?.user_id) {
+      alert("프로젝트가 선택되지 않았거나 사용자 정보가 없습니다.");
+      return;
+    }
+    if (
+      window.confirm(
+        "이 사용자를 매니저로 지정하시겠습니까? 매니저는 프로젝트 삭제 등 주요 권한을 갖게 됩니다."
+      )
+    ) {
+      try {
+        const response = await axios.put(
+          `/api/projects/${selectedProjectId}/members/${memberId}`,
+          {
+            role: "manager",
+            requesterId: user.user_id, // 요청자 ID를 보내 권한 확인
+          }
+        );
+        alert(response.data.message);
+        fetchProjectUsers(); // 사용자 목록 새로고침
+      } catch (err) {
+        console.error("매니저 지정 실패:", err);
+        alert(
+          err.response?.data?.error || "매니저 지정 중 오류가 발생했습니다."
+        );
+      }
+    }
+  };
+
+  const handleTransferOwnership = async (newOwnerId) => {
+    if (!selectedProjectId || !user?.user_id) {
+      alert("프로젝트가 선택되지 않았거나 사용자 정보가 없습니다.");
+      return;
+    }
+
+    const newOwner = projectUsers.find((u) => u.user_id === newOwnerId);
+    const confirmation = window.prompt(
+      `정말로 '${newOwner?.username}'님에게 소유권을 이전하시겠습니까?\n이 작업은 되돌릴 수 없으며, 당신은 더 이상 프로젝트를 삭제할 수 없게 됩니다.\n\n동의하시면 프로젝트 이름('${selectedProject.project_name}')을 정확하게 입력해주세요.`
+    );
+
+    if (confirmation !== selectedProject.project_name) {
+      alert("프로젝트 이름이 일치하지 않아 취소되었습니다.");
+      return;
+    }
+
+    try {
+      const response = await axios.put(
+        `/api/projects/${selectedProjectId}/owner`,
+        {
+          requesterId: user.user_id, // 현재 소유자 ID
+          newOwnerId: newOwnerId, // 새로운 소유자 ID
+        }
+      );
+      alert(response.data.message);
+      // 소유권 이전 후 프로젝트 목록과 사용자 목록을 모두 새로고침
+      await fetchProjects();
+      await fetchProjectUsers();
+    } catch (err) {
+      console.error("소유권 이전 실패:", err);
+      alert(err.response?.data?.error || "소유권 이전 중 오류가 발생했습니다.");
+    }
+  };
+
+  const handleDemoteToMember = async (memberId) => {
+    if (!selectedProjectId || !user?.user_id) {
+      alert("프로젝트가 선택되지 않았거나 사용자 정보가 없습니다.");
+      return;
+    }
+    const memberToDemote = projectUsers.find((u) => u.user_id === memberId);
+    if (
+      window.confirm(
+        `'${memberToDemote?.username}'님을 'member' 등급으로 강등하시겠습니까?`
+      )
+    ) {
+      try {
+        const response = await axios.put(
+          `/api/projects/${selectedProjectId}/members/${memberId}`,
+          {
+            role: "member", // 역할을 'member'로 지정
+            requesterId: user.user_id,
+          }
+        );
+        alert(response.data.message);
+        fetchProjectUsers(); // 사용자 목록 새로고침
+      } catch (err) {
+        console.error("멤버 강등 실패:", err);
+        alert(err.response?.data?.error || "멤버 강등 중 오류가 발생했습니다.");
+      }
+    }
+  };
+
   const toggleAccountMenu = () => setIsAccountMenuOpen(!isAccountMenuOpen);
   const toggleAlarmMenu = () => setIsAlarmMenuOpen(!isAlarmMenuOpen);
   const openModal = () => setIsModalOpen(true);
@@ -872,6 +1084,11 @@ const MainPage = () => {
   const selectedProject = projects.find(
     (p) => p.project_id === selectedProjectId
   );
+
+  const isCurrentUserProjectManager =
+    selectedProject?.role_in_project === "manager";
+  const isCurrentUserProjectOwner =
+    selectedProject?.created_by === user?.user_id;
 
   return (
     <div>
@@ -1201,6 +1418,25 @@ const MainPage = () => {
                                       <div className="task-item-actions">
                                         <button
                                           onClick={() =>
+                                            toggleAssignees(task.task_id)
+                                          }
+                                          className="assignees-btn" // 이 클래스에 대한 스타일을 추가하거나 기존 버튼 스타일 활용
+                                        >
+                                          담당자
+                                          {detailedTaskAssignees[
+                                            task.task_id
+                                          ] &&
+                                          detailedTaskAssignees[task.task_id]
+                                            .length > 0
+                                            ? ` (${
+                                                detailedTaskAssignees[
+                                                  task.task_id
+                                                ].length
+                                              })`
+                                            : ""}
+                                        </button>
+                                        <button
+                                          onClick={() =>
                                             toggleComments(task.task_id)
                                           }
                                           className="comments-btn"
@@ -1233,6 +1469,34 @@ const MainPage = () => {
                                           삭제
                                         </button>
                                       </div>
+                                    </div>
+                                    <div
+                                      className={`task-assignees-wrapper ${
+                                        openAssigneesTaskId === task.task_id
+                                          ? "open"
+                                          : ""
+                                      }`}
+                                    >
+                                      {openAssigneesTaskId === task.task_id && (
+                                        <TaskAssignees
+                                          taskId={task.task_id}
+                                          currentAssignees={
+                                            detailedTaskAssignees[
+                                              task.task_id
+                                            ] || []
+                                          }
+                                          isLoading={
+                                            isLoadingAssignees[task.task_id] ||
+                                            false
+                                          }
+                                          onAddAssignee={
+                                            handleAddAssigneeToTask
+                                          }
+                                          onRemoveAssignee={
+                                            handleRemoveAssigneeFromTask
+                                          }
+                                        />
+                                      )}
                                     </div>
                                     <div
                                       className={`task-comments-wrapper ${
@@ -1349,8 +1613,77 @@ const MainPage = () => {
                           <ul className="project-user-list">
                             {projectUsers.map((pUser) => (
                               <li key={pUser.user_id}>
-                                ID: {pUser.user_id} - 이름: {pUser.username}
-                                {/* 필요하다면 사용자 제거 버튼 등 추가 */}
+                                <span>
+                                  ID: {pUser.user_id} - 이름: {pUser.username} -
+                                  역할: {pUser.role_in_project}
+                                  {/* 현재 유저가 소유자임을 표시 */}
+                                  {selectedProject?.created_by ===
+                                    pUser.user_id && (
+                                    <strong
+                                      style={{
+                                        color: "purple",
+                                        marginLeft: "5px",
+                                      }}
+                                    >
+                                      (소유자)
+                                    </strong>
+                                  )}
+                                </span>
+
+                                {/* 버튼들을 담을 컨테이너 */}
+                                <div style={{ marginLeft: "auto" }}>
+                                  {/* --- 버튼 렌더링 조건 --- */}
+
+                                  {/* 1. 멤버를 매니저로 '승격' 버튼 */}
+                                  {/* 조건: (나는 소유자 또는 매니저) AND (대상은 멤버) */}
+                                  {(isCurrentUserProjectOwner ||
+                                    isCurrentUserProjectManager) &&
+                                    pUser.role_in_project === "member" && (
+                                      <button
+                                        onClick={() =>
+                                          handlePromoteToManager(pUser.user_id)
+                                        }
+                                        className="promote-manager-btn"
+                                        style={{ marginLeft: "10px" }}
+                                      >
+                                        매니저로 지정
+                                      </button>
+                                    )}
+
+                                  {/* 2. 매니저를 멤버로 '강등' 버튼 */}
+                                  {/* 조건: (나는 소유자) AND (대상은 매니저) AND (대상은 내가 아님) */}
+                                  {isCurrentUserProjectOwner &&
+                                    pUser.role_in_project === "manager" &&
+                                    user.user_id !== pUser.user_id && (
+                                      <button
+                                        onClick={() =>
+                                          handleDemoteToMember(pUser.user_id)
+                                        }
+                                        className="demote-member-btn"
+                                        style={{
+                                          marginLeft: "10px",
+                                          backgroundColor: "#f39c12",
+                                        }}
+                                      >
+                                        멤버로 강등
+                                      </button>
+                                    )}
+
+                                  {/* 3. '소유권 이전' 버튼 */}
+                                  {/* 조건: (나는 소유자) AND (대상은 내가 아님) */}
+                                  {isCurrentUserProjectOwner &&
+                                    user.user_id !== pUser.user_id && (
+                                      <button
+                                        onClick={() =>
+                                          handleTransferOwnership(pUser.user_id)
+                                        }
+                                        className="transfer-owner-btn"
+                                        style={{ marginLeft: "10px" }}
+                                      >
+                                        소유권 이전
+                                      </button>
+                                    )}
+                                </div>
                               </li>
                             ))}
                           </ul>

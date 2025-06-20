@@ -365,8 +365,9 @@ app.put("/api/projects/:id", (req, res) => {
     return res.status(400).json({ error: "프로젝트 이름은 필수입니다." });
   }
 
-  const sql = "UPDATE projects SET project_name = ?, content = ?, end_date = ? WHERE project_id = ?";
-  db.query(sql, [name, content, end_date,id], (err, result) => {
+  const sql =
+    "UPDATE projects SET project_name = ?, content = ?, end_date = ? WHERE project_id = ?";
+  db.query(sql, [name, content, end_date, id], (err, result) => {
     if (err) {
       console.error("Error updating project:", err);
       return res
@@ -979,9 +980,271 @@ app.delete("/api/tasks/:id", (req, res) => {
   });
 });
 
-// --- 6. 댓글 API (Comments on Tasks) ---
+// --- 6. 업무 담당자 API (Task Assignees) ---
 
-// 6.1. 특정 업무의 모든 댓글 가져오기
+// 6.1. 특정 업무의 담당자 목록 조회 (GET)
+app.get("/api/tasks/:taskId/assignees", async (req, res) => {
+  const { taskId } = req.params;
+  const numericTaskId = parseInt(taskId, 10);
+
+  if (isNaN(numericTaskId)) {
+    return res.status(400).json({ error: "잘못된 업무 ID 형식입니다." });
+  }
+
+  // 여기서는 별도의 권한 검사 없이, 해당 taskId의 담당자 목록을 반환합니다.
+  // 필요하다면, 요청자가 최소한 해당 프로젝트의 멤버인지 확인하는 로직을 추가할 수 있습니다.
+  const sql = `
+    SELECT u.user_id, u.username
+    FROM task_assignees ta
+    JOIN users u ON ta.user_id = u.user_id
+    WHERE ta.task_id = ?;
+  `;
+
+  try {
+    const [assignees] = await db.promise().query(sql, [numericTaskId]);
+    res.json(assignees);
+  } catch (err) {
+    console.error(`Error fetching assignees for task ${numericTaskId}:`, err);
+    res.status(500).json({ error: "담당자 목록 조회 중 오류가 발생했습니다." });
+  }
+});
+
+// 6.2. 업무에 담당자 추가 (POST) - 매니저 권한 필요
+app.post("/api/tasks/:taskId/assignees", async (req, res) => {
+  const { taskId } = req.params;
+  const { username: usernameToAdd } = req.body; // 프론트에서 보내는 담당자 이름
+  const requesterUserId = req.user?.user_id; // JWT 등에서 인증된 사용자 ID를 가져온다고 가정
+
+  if (!requesterUserId) {
+    return res.status(401).json({ error: "인증되지 않은 사용자입니다." });
+  }
+  if (!usernameToAdd) {
+    return res
+      .status(400)
+      .json({ error: "추가할 담당자의 사용자 이름은 필수입니다." });
+  }
+
+  const numericTaskId = parseInt(taskId, 10);
+  if (isNaN(numericTaskId)) {
+    return res.status(400).json({ error: "잘못된 업무 ID 형식입니다." });
+  }
+
+  let connection;
+  try {
+    connection = await db.promise().getConnection();
+    await connection.beginTransaction();
+
+    // 1. 요청자가 해당 업무가 속한 프로젝트의 매니저인지 확인
+    const [taskProjectRows] = await connection.execute(
+      "SELECT project_id FROM tasks WHERE task_id = ?",
+      [numericTaskId]
+    );
+    if (taskProjectRows.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(404).json({ error: "해당 업무를 찾을 수 없습니다." });
+    }
+    const projectId = taskProjectRows[0].project_id;
+
+    const [managerCheckRows] = await connection.execute(
+      "SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?",
+      [projectId, requesterUserId]
+    );
+
+    if (
+      managerCheckRows.length === 0 ||
+      managerCheckRows[0].role_in_project !== "manager"
+    ) {
+      await connection.rollback();
+      connection.release();
+      return res
+        .status(403)
+        .json({ error: "담당자를 추가할 권한이 없습니다. (매니저 전용)" });
+    }
+
+    // 2. 추가하려는 사용자가 존재하는지, 그리고 해당 프로젝트의 멤버인지 확인
+    const [userToAddRows] = await connection.execute(
+      "SELECT user_id FROM users WHERE username = ?",
+      [usernameToAdd]
+    );
+    if (userToAddRows.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res
+        .status(404)
+        .json({ error: `'${usernameToAdd}' 사용자를 찾을 수 없습니다.` });
+    }
+    const userIdToAdd = userToAddRows[0].user_id;
+
+    const [projectMemberCheckRows] = await connection.execute(
+      "SELECT user_id FROM project_members WHERE project_id = ? AND user_id = ?",
+      [projectId, userIdToAdd]
+    );
+    if (projectMemberCheckRows.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({
+        error: `'${usernameToAdd}' 사용자는 이 프로젝트의 멤버가 아닙니다.`,
+      });
+    }
+
+    // 3. 이미 해당 업무의 담당자인지 확인
+    const [existingAssigneeRows] = await connection.execute(
+      "SELECT task_id FROM task_assignees WHERE task_id = ? AND user_id = ?",
+      [numericTaskId, userIdToAdd]
+    );
+    if (existingAssigneeRows.length > 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(409).json({
+        error: `'${usernameToAdd}' 사용자는 이미 이 업무의 담당자입니다.`,
+      });
+    }
+
+    // 4. task_assignees 테이블에 담당자 추가
+    await connection.execute(
+      "INSERT INTO task_assignees (task_id, user_id) VALUES (?, ?)",
+      [numericTaskId, userIdToAdd]
+    );
+
+    // 5. (선택) 활동 로그 기록
+    logActivity(requesterUserId, projectId, numericTaskId, "ASSIGNEE_ADDED", {
+      assigneeUsername: usernameToAdd,
+    }).catch((logErr) =>
+      console.error("활동 로그 기록 실패 (담당자 추가):", logErr)
+    );
+
+    await connection.commit();
+    res.status(201).json({
+      message: `'${usernameToAdd}' 사용자가 업무 담당자로 추가되었습니다.`,
+    });
+  } catch (err) {
+    if (connection) await connection.rollback();
+    console.error(`Error adding assignee to task ${numericTaskId}:`, err);
+    res.status(500).json({
+      error: "담당자 추가 중 오류가 발생했습니다.",
+      details: err.message,
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+// 6.3. 업무에서 담당자 제외 (DELETE) - 매니저 권한 필요
+app.delete("/api/tasks/:taskId/assignees/:userIdToRemove", async (req, res) => {
+  const { taskId, userIdToRemove } = req.params;
+  const requesterUserId = req.user?.user_id; // JWT 등에서 인증된 사용자 ID
+
+  if (!requesterUserId) {
+    return res.status(401).json({ error: "인증되지 않은 사용자입니다." });
+  }
+
+  const numericTaskId = parseInt(taskId, 10);
+  const numericUserIdToRemove = parseInt(userIdToRemove, 10);
+
+  if (isNaN(numericTaskId) || isNaN(numericUserIdToRemove)) {
+    return res.status(400).json({ error: "잘못된 ID 형식입니다." });
+  }
+
+  let connection;
+  try {
+    connection = await db.promise().getConnection();
+    await connection.beginTransaction();
+
+    // 1. 요청자가 해당 업무가 속한 프로젝트의 매니저인지 확인
+    const [taskProjectRows] = await connection.execute(
+      "SELECT project_id FROM tasks WHERE task_id = ?",
+      [numericTaskId]
+    );
+    if (taskProjectRows.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(404).json({ error: "해당 업무를 찾을 수 없습니다." });
+    }
+    const projectId = taskProjectRows[0].project_id;
+
+    const [managerCheckRows] = await connection.execute(
+      "SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?",
+      [projectId, requesterUserId]
+    );
+    if (
+      managerCheckRows.length === 0 ||
+      managerCheckRows[0].role_in_project !== "manager"
+    ) {
+      await connection.rollback();
+      connection.release();
+      return res
+        .status(403)
+        .json({ error: "담당자를 제외할 권한이 없습니다. (매니저 전용)" });
+    }
+
+    // 2. 실제로 해당 사용자가 업무의 담당자인지 확인
+    const [assigneeCheckRows] = await connection.execute(
+      "SELECT user_id FROM task_assignees WHERE task_id = ? AND user_id = ?",
+      [numericTaskId, numericUserIdToRemove]
+    );
+    if (assigneeCheckRows.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res
+        .status(404)
+        .json({ error: "해당 사용자는 이 업무의 담당자가 아닙니다." });
+    }
+
+    // 3. task_assignees 테이블에서 담당자 제외
+    const [deleteResult] = await connection.execute(
+      "DELETE FROM task_assignees WHERE task_id = ? AND user_id = ?",
+      [numericTaskId, numericUserIdToRemove]
+    );
+
+    if (deleteResult.affectedRows === 0) {
+      // 이 경우는 위 2번에서 이미 걸러졌어야 하지만, 안전 장치로 둡니다.
+      await connection.rollback();
+      connection.release();
+      return res
+        .status(404)
+        .json({ error: "제외할 담당자를 찾을 수 없거나 이미 제외되었습니다." });
+    }
+
+    // 4. (선택) 활동 로그 기록
+    // 제외된 사용자의 username을 가져와서 로그에 포함할 수 있습니다.
+    const [removedUserRows] = await connection.execute(
+      "SELECT username FROM users WHERE user_id = ?",
+      [numericUserIdToRemove]
+    );
+    const removedUsername =
+      removedUserRows.length > 0
+        ? removedUserRows[0].username
+        : `User ID ${numericUserIdToRemove}`;
+
+    logActivity(requesterUserId, projectId, numericTaskId, "ASSIGNEE_REMOVED", {
+      assigneeUsername: removedUsername,
+    }).catch((logErr) =>
+      console.error("활동 로그 기록 실패 (담당자 제외):", logErr)
+    );
+
+    await connection.commit();
+    res.json({
+      message: `사용자(ID: ${numericUserIdToRemove})가 업무 담당자에서 제외되었습니다.`,
+    });
+  } catch (err) {
+    if (connection) await connection.rollback();
+    console.error(
+      `Error removing assignee ${numericUserIdToRemove} from task ${numericTaskId}:`,
+      err
+    );
+    res.status(500).json({
+      error: "담당자 제외 중 오류가 발생했습니다.",
+      details: err.message,
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+// --- 7. 댓글 API (Comments on Tasks) ---
+
+// 7.1. 특정 업무의 모든 댓글 가져오기
 app.get("/api/tasks/:taskId/comments", (req, res) => {
   const { taskId } = req.params;
   const sql = `
@@ -1008,7 +1271,7 @@ app.get("/api/tasks/:taskId/comments", (req, res) => {
   });
 });
 
-// 6.2. 새로운 댓글 작성
+// 7.2. 새로운 댓글 작성
 app.post("/api/tasks/:taskId/comments", (req, res) => {
   const { taskId } = req.params;
   const { user_id, content } = req.body;
@@ -1036,7 +1299,7 @@ app.post("/api/tasks/:taskId/comments", (req, res) => {
   });
 });
 
-// 6.3. 댓글 삭제 (새로 추가)
+// 7.3. 댓글 삭제 (새로 추가)
 app.delete("/api/comments/:commentId", (req, res) => {
   const { commentId } = req.params;
   const { userId } = req.body; // 요청 본문에서 요청자 ID를 받음 (프론트에서 data: { userId: ... } 로 보내야 함)
@@ -1090,7 +1353,7 @@ app.delete("/api/comments/:commentId", (req, res) => {
   });
 });
 
-// --- 7. 프로필 API ---
+// --- 8. 프로필 API ---
 app.get("/api/profile", (req, res) => {
   // 프론트에서 user_id 를 쿼리 파라미터 또는 헤더로 전달한다고 가정
   const userId = req.query.user_id; // 또는 req.headers['user-id']
@@ -1213,6 +1476,173 @@ app.get("/api/projects/:projectId/users", async (req, res) => {
   } catch (err) {
     console.error("프로젝트 사용자 조회 실패:", err);
     res.status(500).json({ error: "사용자 목록 조회 중 오류 발생" });
+  }
+});
+// --- 9. 프로젝트 멤버 역할 변경 API (승격/강등 통합) ---
+app.put("/api/projects/:projectId/members/:memberId", async (req, res) => {
+  const { projectId, memberId } = req.params;
+  const { requesterId, role: newRole } = req.body; // newRole: 'manager' 또는 'member'
+
+  if (!requesterId || !newRole || !["manager", "member"].includes(newRole)) {
+    return res.status(400).json({ error: "요청 정보가 올바르지 않습니다." });
+  }
+
+  const connection = await db.promise().getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // 1. 요청자의 권한 정보 확인 (프로젝트 소유자인지, 역할이 무엇인지)
+    const [projectRows] = await connection.query(
+      "SELECT created_by FROM projects WHERE project_id = ?",
+      [projectId]
+    );
+    const [requesterRows] = await connection.query(
+      "SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?",
+      [projectId, requesterId]
+    );
+
+    if (projectRows.length === 0 || requesterRows.length === 0) {
+      return res
+        .status(404)
+        .json({ error: "프로젝트 또는 요청자 정보를 찾을 수 없습니다." });
+    }
+
+    const isOwner = projectRows[0].created_by === requesterId;
+    const requesterRole = requesterRows[0].role_in_project;
+
+    // 2. 권한 검사
+    let authorized = false;
+    // Case 1: 매니저로 승격시키는 경우 -> 소유자 또는 매니저가 할 수 있음
+    if (newRole === "manager") {
+      if (isOwner || requesterRole === "manager") {
+        authorized = true;
+      }
+    }
+    // Case 2: 멤버로 강등시키는 경우 -> 오직 소유자만 할 수 있음
+    else if (newRole === "member") {
+      if (isOwner) {
+        // 소유자는 자기 자신을 강등시킬 수 없음
+        if (projectRows[0].created_by === parseInt(memberId)) {
+          return res
+            .status(400)
+            .json({ error: "프로젝트 소유자는 역할을 변경할 수 없습니다." });
+        }
+        authorized = true;
+      }
+    }
+
+    if (!authorized) {
+      return res
+        .status(403)
+        .json({ error: "멤버의 역할을 변경할 권한이 없습니다." });
+    }
+
+    // 3. 대상 멤버의 역할 업데이트 실행
+    const [updateResult] = await connection.query(
+      "UPDATE project_members SET role_in_project = ? WHERE project_id = ? AND user_id = ?",
+      [newRole, projectId, memberId]
+    );
+
+    if (updateResult.affectedRows === 0) {
+      return res
+        .status(404)
+        .json({ message: "역할을 변경할 사용자를 찾을 수 없습니다." });
+    }
+
+    await connection.commit();
+    res.json({ message: "사용자의 역할이 성공적으로 변경되었습니다." });
+  } catch (err) {
+    await connection.rollback();
+    console.error("멤버 역할 변경 중 오류:", err);
+    res
+      .status(500)
+      .json({ error: "서버 오류로 인해 역할 변경에 실패했습니다." });
+  } finally {
+    connection.release();
+  }
+});
+
+// server.js 파일 맨 아래, app.listen 위에 추가
+
+// --- 10. 프로젝트 소유권 이전 API ---
+app.put("/api/projects/:projectId/owner", async (req, res) => {
+  const { projectId } = req.params;
+  // requesterId: 현재 소유자, newOwnerId: 새로 소유자가 될 사용자
+  const { requesterId, newOwnerId } = req.body;
+
+  if (!requesterId || !newOwnerId) {
+    return res
+      .status(400)
+      .json({ error: "요청자 ID와 새로운 소유자 ID가 모두 필요합니다." });
+  }
+
+  if (requesterId === newOwnerId) {
+    return res
+      .status(400)
+      .json({ error: "자기 자신에게 소유권을 이전할 수 없습니다." });
+  }
+
+  const connection = await db.promise().getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // 1. 현재 프로젝트의 소유자 정보 확인
+    const [projectRows] = await connection.query(
+      "SELECT created_by FROM projects WHERE project_id = ?",
+      [projectId]
+    );
+
+    if (projectRows.length === 0) {
+      throw new Error("프로젝트를 찾을 수 없습니다.");
+    }
+
+    const currentOwnerId = projectRows[0].created_by;
+
+    // 2. 요청자가 현재 소유자인지 권한 확인
+    if (currentOwnerId !== requesterId) {
+      return res
+        .status(403)
+        .json({ error: "프로젝트 소유자만 소유권을 이전할 수 있습니다." });
+    }
+
+    // 3. 새로운 소유자가 프로젝트 멤버인지 확인
+    const [memberRows] = await connection.query(
+      "SELECT * FROM project_members WHERE project_id = ? AND user_id = ?",
+      [projectId, newOwnerId]
+    );
+
+    if (memberRows.length === 0) {
+      return res
+        .status(400)
+        .json({
+          error: "새로운 소유자는 반드시 프로젝트에 참여한 멤버여야 합니다.",
+        });
+    }
+
+    // 4. 프로젝트 소유자 변경 (projects 테이블 업데이트)
+    await connection.query(
+      "UPDATE projects SET created_by = ? WHERE project_id = ?",
+      [newOwnerId, projectId]
+    );
+
+    // 5. 새로운 소유자의 역할을 'manager'로 승격 (이미 매니저가 아니라면)
+    if (memberRows[0].role_in_project !== "manager") {
+      await connection.query(
+        "UPDATE project_members SET role_in_project = 'manager' WHERE project_id = ? AND user_id = ?",
+        [projectId, newOwnerId]
+      );
+    }
+
+    await connection.commit();
+    res.json({ message: "프로젝트 소유권이 성공적으로 이전되었습니다." });
+  } catch (err) {
+    await connection.rollback();
+    console.error("프로젝트 소유권 이전 중 오류:", err);
+    res
+      .status(500)
+      .json({ error: "서버 오류로 인해 소유권 이전에 실패했습니다." });
+  } finally {
+    connection.release();
   }
 });
 

@@ -1,0 +1,105 @@
+.task-assignees-wrapper {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease-out, padding-top 0.3s ease-out,
+    padding-bottom 0.3s ease-out, border-width 0.3s ease-out;
+  background-color: #fcfcfc; /* 댓글 섹션과 유사한 배경 */
+  border: 0px solid #e0e0e0; /* 초기에는 테두리 없음 */
+  border-radius: 0 0 5px 5px;
+  margin-top: 10px;
+  padding: 0 15px; /* 열릴 때 padding-top/bottom 적용 */
+}
+
+.task-assignees-wrapper.open {
+  max-height: 500px; /* 충분한 높이, 내용에 따라 조절 */
+  padding-top: 15px;
+  padding-bottom: 15px;
+  border-width: 1px; /* 열릴 때 테두리 표시 */
+}
+
+.task-assignees-content h4 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 1.05em; /* 댓글 제목보다 약간 작게 */
+  color: #444;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 5px;
+}
+
+.task-assignees-loading,
+.no-assignees-message {
+  padding: 10px 0;
+  text-align: center;
+  color: #777;
+  font-style: italic;
+}
+
+.assignees-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 15px 0;
+}
+
+.assignee-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 5px;
+  border-bottom: 1px dashed #f0f0f0;
+  font-size: 0.9em;
+}
+
+.assignee-item:last-child {
+  border-bottom: none;
+}
+
+.assignee-item span {
+  color: #555;
+}
+
+.remove-assignee-btn {
+  padding: 4px 8px;
+  font-size: 0.8em;
+  background-color: #ffebee; /* 연한 빨강 배경 */
+  color: #c62828; /* 어두운 빨강 텍스트 */
+  border: 1px solid #ffcdd2;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+.remove-assignee-btn:hover {
+  background-color: #ffcdd2;
+}
+
+.add-assignee-form {
+  margin-top: 15px;
+}
+
+.add-assignee-form .form-group-assignee {
+  display: flex;
+  gap: 8px; /* 입력 필드와 버튼 사이 간격 */
+  align-items: center;
+}
+
+.assignee-input {
+  flex-grow: 1;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.add-assignee-btn {
+  padding: 8px 12px;
+  background-color: #4caf50; /* 댓글 추가 버튼과 유사한 색상 */
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: background-color 0.2s ease;
+}
+
+.add-assignee-btn:hover {
+  background-color: #388e3c;
+}
