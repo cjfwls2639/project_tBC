@@ -379,14 +379,11 @@ app.put("/api/projects/:id", (req, res) => {
   });
 });
 
-// 2.5. 프로젝트 삭제 (DELETE)
+// 2.5. 프로젝트 삭제 (DELETE) - 매니저 권한으로 변경
 app.delete("/api/projects/:id", async (req, res) => {
-  // async 키워드 추가
   const { id } = req.params; // 삭제할 프로젝트 ID
-  // 요청 본문에서 userId를 가져옵니다. (프론트엔드에서 data: { userId: user.user_id } 로 보냈을 경우)
-  const { userId } = req.body;
+  const { userId } = req.body; // 요청자 ID
 
-  // 1. 요청을 보낸 사용자 ID가 있는지 확인
   if (!userId) {
     return res.status(401).json({ error: "인증되지 않은 사용자입니다." });
   }
@@ -395,36 +392,38 @@ app.delete("/api/projects/:id", async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // 2. 삭제하려는 프로젝트의 owner_id를 조회
-    const [projectRows] = await connection.query(
-      "SELECT created_by FROM projects WHERE project_id = ?", // project_id로 컬럼명 수정
-      [id]
+    // 1. 요청자가 해당 프로젝트의 매니저인지 확인 (권한 로직 변경)
+    const [memberRows] = await connection.query(
+      "SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?",
+      [id, userId]
     );
 
-    if (projectRows.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ message: "프로젝트를 찾을 수 없습니다." });
-    }
-
-    const projectOwnerId = projectRows[0].created_by;
-
-    // 3. 요청을 보낸 사용자가 프로젝트의 owner인지 확인
-    if (projectOwnerId !== parseInt(userId)) {
-      // userId는 문자열일 수 있으므로 parseInt
+    // 2. 매니저가 아니면 삭제 권한 없음
+    if (memberRows.length === 0 || memberRows[0].role_in_project !== 'manager') {
       await connection.rollback();
       return res
         .status(403)
-        .json({ error: "프로젝트 소유자만 삭제할 수 있습니다." });
+        .json({ error: "프로젝트 매니저만 삭제할 수 있습니다." });
     }
 
-    //4. 콘솔에 프로젝트 삭제 로그 띄우기
+    // 3. 로그 기록을 위해 삭제 전에 프로젝트 이름을 조회
+    const [projectDetails] = await connection.query(
+        "SELECT project_name FROM projects WHERE project_id = ?",
+        [id]
+    );
+    if (projectDetails.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ message: "삭제할 프로젝트 정보를 찾을 수 없습니다." });
+    }
+
+    // 4. 활동 로그 기록
     await logActivity(connection, userId, id, null, "PROJECT_DELETED", {
-      projectName: projectRows[0].project_name,
+      projectName: projectDetails[0].project_name,
     });
 
-    // 5. 소유자가 맞다면 프로젝트 삭제 진행
+    // 5. 프로젝트 삭제 실행
     const [deleteResult] = await connection.query(
-      "DELETE FROM projects WHERE project_id = ?", // project_id로 컬럼명 수정
+      "DELETE FROM projects WHERE project_id = ?",
       [id]
     );
 
@@ -1614,92 +1613,10 @@ app.put("/api/projects/:projectId/members/:memberId", async (req, res) => {
   }
 });
 
-// server.js 파일 맨 아래, app.listen 위에 추가
-
-// --- 10. 프로젝트 소유권 이전 API ---
-app.put("/api/projects/:projectId/owner", async (req, res) => {
-  const { projectId } = req.params;
-  // requesterId: 현재 소유자, newOwnerId: 새로 소유자가 될 사용자
-  const { requesterId, newOwnerId } = req.body;
-
-  if (!requesterId || !newOwnerId) {
-    return res
-      .status(400)
-      .json({ error: "요청자 ID와 새로운 소유자 ID가 모두 필요합니다." });
-  }
-
-  if (requesterId === newOwnerId) {
-    return res
-      .status(400)
-      .json({ error: "자기 자신에게 소유권을 이전할 수 없습니다." });
-  }
-
-  const connection = await db.promise().getConnection();
-  try {
-    await connection.beginTransaction();
-
-    // 1. 현재 프로젝트의 소유자 정보 확인
-    const [projectRows] = await connection.query(
-      "SELECT created_by FROM projects WHERE project_id = ?",
-      [projectId]
-    );
-
-    if (projectRows.length === 0) {
-      throw new Error("프로젝트를 찾을 수 없습니다.");
-    }
-
-    const currentOwnerId = projectRows[0].created_by;
-
-    // 2. 요청자가 현재 소유자인지 권한 확인
-    if (currentOwnerId !== requesterId) {
-      return res
-        .status(403)
-        .json({ error: "프로젝트 소유자만 소유권을 이전할 수 있습니다." });
-    }
-
-    // 3. 새로운 소유자가 프로젝트 멤버인지 확인
-    const [memberRows] = await connection.query(
-      "SELECT * FROM project_members WHERE project_id = ? AND user_id = ?",
-      [projectId, newOwnerId]
-    );
-
-    if (memberRows.length === 0) {
-      return res.status(400).json({
-        error: "새로운 소유자는 반드시 프로젝트에 참여한 멤버여야 합니다.",
-      });
-    }
-
-    // 4. 프로젝트 소유자 변경 (projects 테이블 업데이트)
-    await connection.query(
-      "UPDATE projects SET created_by = ? WHERE project_id = ?",
-      [newOwnerId, projectId]
-    );
-
-    // 5. 새로운 소유자의 역할을 'manager'로 승격 (이미 매니저가 아니라면)
-    if (memberRows[0].role_in_project !== "manager") {
-      await connection.query(
-        "UPDATE project_members SET role_in_project = 'manager' WHERE project_id = ? AND user_id = ?",
-        [projectId, newOwnerId]
-      );
-    }
-
-    await connection.commit();
-    res.json({ message: "프로젝트 소유권이 성공적으로 이전되었습니다." });
-  } catch (err) {
-    await connection.rollback();
-    console.error("프로젝트 소유권 이전 중 오류:", err);
-    res
-      .status(500)
-      .json({ error: "서버 오류로 인해 소유권 이전에 실패했습니다." });
-  } finally {
-    connection.release();
-  }
-});
-
-// --- 8. 프로젝트 멤버 역할 변경 API (승격/강등 통합) ---
+// --- 8. 프로젝트 멤버 역할 변경 API (매니저 권한 강화) ---
 app.put("/api/projects/:projectId/members/:memberId", async (req, res) => {
   const { projectId, memberId } = req.params;
-  const { requesterId, role: newRole } = req.body; // newRole: 'manager' 또는 'member'
+  const { requesterId, role: newRole } = req.body;
 
   if (!requesterId || !newRole || !["manager", "member"].includes(newRole)) {
     return res.status(400).json({ error: "요청 정보가 올바르지 않습니다." });
@@ -1709,50 +1626,34 @@ app.put("/api/projects/:projectId/members/:memberId", async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // 1. 요청자의 권한 정보 확인 (프로젝트 소유자인지, 역할이 무엇인지)
-    const [projectRows] = await connection.query(
-      "SELECT created_by FROM projects WHERE project_id = ?",
-      [projectId]
-    );
     const [requesterRows] = await connection.query(
       "SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?",
       [projectId, requesterId]
     );
 
-    if (projectRows.length === 0 || requesterRows.length === 0) {
-      return res
-        .status(404)
-        .json({ error: "프로젝트 또는 요청자 정보를 찾을 수 없습니다." });
+    if (requesterRows.length === 0) {
+      return res.status(404).json({ error: "요청자 정보를 찾을 수 없습니다." });
     }
 
-    const isOwner = projectRows[0].created_by === requesterId;
     const requesterRole = requesterRows[0].role_in_project;
 
-    // 2. 권한 검사
-    let authorized = false;
-    // Case 1: 매니저로 승격시키는 경우 -> 소유자 또는 매니저가 할 수 있음
-    if (newRole === "manager") {
-      if (isOwner || requesterRole === "manager") {
-        authorized = true;
-      }
-    }
-    // Case 2: 멤버로 강등시키는 경우 -> 오직 소유자만 할 수 있음
-    else if (newRole === "member") {
-      if (isOwner) {
-        // 소유자는 자기 자신을 강등시킬 수 없음
-        if (projectRows[0].created_by === parseInt(memberId)) {
-          return res
-            .status(400)
-            .json({ error: "프로젝트 소유자는 역할을 변경할 수 없습니다." });
-        }
-        authorized = true;
-      }
+    // 1. 권한 검사: 오직 매니저만 역할을 변경할 수 있음
+    if (requesterRole !== 'manager') {
+      return res.status(403).json({ error: "멤버의 역할을 변경할 권한이 없습니다. (매니저 전용)" });
     }
 
-    if (!authorized) {
-      return res
-        .status(403)
-        .json({ error: "멤버의 역할을 변경할 권한이 없습니다." });
+    // 2. 강등 시 보호 로직
+    if (newRole === 'member') {
+      // 자기 자신은 강등 불가
+      if (parseInt(requesterId) === parseInt(memberId)) {
+        return res.status(400).json({ error: "자기 자신을 강등시킬 수 없습니다." });
+      }
+
+      // 프로젝트 원본 생성자는 강등시키지 못하도록 보호
+      const [projectRows] = await connection.query("SELECT created_by FROM projects WHERE project_id = ?", [projectId]);
+      if (projectRows.length > 0 && projectRows[0].created_by === parseInt(memberId)) {
+          return res.status(403).json({ error: "프로젝트 생성자는 강등시킬 수 없습니다."});
+      }
     }
 
     // 3. 대상 멤버의 역할 업데이트 실행
@@ -1762,9 +1663,7 @@ app.put("/api/projects/:projectId/members/:memberId", async (req, res) => {
     );
 
     if (updateResult.affectedRows === 0) {
-      return res
-        .status(404)
-        .json({ message: "역할을 변경할 사용자를 찾을 수 없습니다." });
+      return res.status(404).json({ message: "역할을 변경할 사용자를 찾을 수 없습니다." });
     }
 
     await connection.commit();
@@ -1772,15 +1671,11 @@ app.put("/api/projects/:projectId/members/:memberId", async (req, res) => {
   } catch (err) {
     await connection.rollback();
     console.error("멤버 역할 변경 중 오류:", err);
-    res
-      .status(500)
-      .json({ error: "서버 오류로 인해 역할 변경에 실패했습니다." });
+    res.status(500).json({ error: "서버 오류로 인해 역할 변경에 실패했습니다." });
   } finally {
     connection.release();
   }
 });
-
-// server.js 파일 맨 아래, app.listen 위에 추가
 
 // --- 9. 프로젝트 소유권 이전 API ---
 app.put("/api/projects/:projectId/owner", async (req, res) => {
