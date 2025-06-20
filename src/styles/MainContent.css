@@ -239,11 +239,11 @@
 
 .form-buttons .submit-btn,
 .form-buttons .cancel-btn {
-  padding: 10px 20px;
+  padding: 0.6em 1.5em;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 1em;
+  font-size: 0.7em;
   transition: background-color 0.2s ease-in-out;
   width: 5rem;
   height: 2.5rem;
