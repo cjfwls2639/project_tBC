@@ -471,3 +471,21 @@
   background-color: #bdc3c7; /* 회색 */
   cursor: not-allowed;
 }
+
+.edit-project-btn {
+  padding: 5px 12px; 
+  border: 1px solid #1264f3; /* 주황색 테두리 */
+  background-color: transparent; /* 배경은 투명하게 */
+  color: #1264f3; /* 글자색도 주황색 */
+  border-radius: 5px; /* 모서리를 둥글게 */
+  font-size: 0.7em;
+  font-weight: 500; /* 글자 두께 */
+  cursor: pointer;
+  transition: all 0.2s ease-in-out; /* 부드러운 전환 효과 */
+}
+
+.edit-project-btn:hover {
+  /* 마우스를 올렸을 때 스타일 */
+  background-color: #1264f3; /* 주황색 배경 */
+  color: white; /* 흰색 글자 */
+}
