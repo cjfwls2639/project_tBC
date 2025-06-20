@@ -214,7 +214,9 @@ const TaskForm = ({
     <form onSubmit={handleSubmit} className="task-form">
       <h3>{formType === "create" ? "새 업무 생성" : "업무 수정/상세"}</h3>
       <div className="form-group">
-        <label htmlFor="taskTitle">업무 제목</label>
+        <label htmlFor="taskTitle" className="taskTitleLabel">
+          업무 제목
+        </label>
         <input
           id="taskTitle"
           type="text"
@@ -227,7 +229,9 @@ const TaskForm = ({
         />
       </div>
       <div className="form-group">
-        <label htmlFor="taskDescription">업무 내용</label>
+        <label htmlFor="taskDescription" className="taskDescriptionLabel">
+          업무 내용
+        </label>
         <textarea
           id="taskDescription"
           value={description}
@@ -238,7 +242,9 @@ const TaskForm = ({
         />
       </div>
       <div className="form-group">
-        <label htmlFor="taskStatus">상태</label>
+        <label htmlFor="taskStatus" className="taskStatusLabel">
+          상태
+        </label>
         <select
           id="taskStatus"
           value={status}
@@ -252,7 +258,9 @@ const TaskForm = ({
         </select>
       </div>
       <div className="form-group">
-        <label htmlFor="taskDueDate">마감일</label>
+        <label htmlFor="taskDueDate" className="taskDueDateLabel">
+          마감일
+        </label>
         <input
           id="taskDueDate"
           type="date"
