@@ -267,7 +267,7 @@ app.post("/api/projects", async (req, res) => {
       created_by,
       projectId,
       null,
-      "PROJECT_CREATED",
+      "프로젝트 생성",
       { projectName: name } 
     );
 
@@ -385,6 +385,19 @@ app.put("/api/projects/:id", async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ message: "변경된 내용이 없습니다." });
     }
+
+    await logActivity(
+      connection,
+      userId,
+      parseInt(id),
+      null,
+      "프로젝트 수정",
+      {
+        updatedName: name,
+        updatedContent: content,
+        updatedEndDate: end_date,
+      }
+    );
 
     res.json({ message: "프로젝트가 성공적으로 수정되었습니다." });
   } catch (err) {
@@ -676,28 +689,12 @@ app.post("/api/projects/:projectId/tasks", async (req, res) => {
     ]);
 
     // 5. 활동 로그 기록 (logActivity 함수는 트랜잭션과 별개로 실행되거나, connection을 받을 수 있도록 수정 필요)
-    // 여기서는 logActivity가 connection을 받지 않고 독립적으로 db 풀을 사용한다고 가정
-    // (이전 답변에서 logActivity 함수 수정 제안 참고)
-    logActivity(
-      created_by_user_id,
-      parseInt(projectId),
-      newTaskId,
-      "TASK_CREATED",
-      { taskTitle: title }
-    ).catch((logErr) => {
-      // 로그 기록 실패는 주 작업의 성공/실패에 영향을 미치지 않도록 콘솔에만 에러 출력
-      console.error(
-        "활동 로그 기록 중 오류 발생 (업무 생성 자체는 성공 가능):",
-        logErr
-      );
-    });
-
     await logActivity(
       connection,
       created_by_user_id,
       parseInt(projectId),
       newTaskId,
-      "TASK_CREATED",
+      "업무 생성",
       { taskName: title }
     );
 
@@ -815,7 +812,7 @@ app.put("/api/tasks/:taskId", async (req, res) => {
 
     if (updateResult.affectedRows > 0) {
       // 활동 로그 기록 추가
-      await logActivity(connection, requesterId, projectId, taskId, "TASK_UPDATED", {
+      await logActivity(connection, requesterId, projectId, taskId, "업무 수정", {
         updatedTaskName: title,
         newStatus: status,
       });
@@ -856,7 +853,7 @@ app.delete("/api/tasks/:id", async (req, res) => {
     const { project_id, task_name } = taskRows[0];
 
     // 활동 로그 기록 (삭제 전에!)
-    await logActivity(connection, userId, project_id, numericTaskId, "TASK_DELETED", {
+    await logActivity(connection, userId, project_id, numericTaskId, "업무 삭제", {
         deletedTaskName: task_name,
     });
 
@@ -1021,7 +1018,7 @@ app.post("/api/tasks/:taskId/assignees", async (req, res) => {
       numericRequesterUserId,
       projectId,
       numericTaskId,
-      "ASSIGNEE_ADDED",
+      "업무 권한 부여",
       { assigneeUsername: usernameToAdd }
     ).catch((logErr) =>
       console.error("활동 로그 기록 실패 (담당자 추가):", logErr)
@@ -1154,7 +1151,7 @@ app.delete("/api/tasks/:taskId/assignees/:userIdToRemove", async (req, res) => {
       numericRequesterUserId,
       projectId,
       numericTaskId,
-      "ASSIGNEE_REMOVED",
+      "업무 권한 제외",
       { assigneeUsername: removedUsername }
     ).catch((logErr) =>
       console.error("활동 로그 기록 실패 (담당자 제외):", logErr)
@@ -1369,7 +1366,7 @@ app.post("/api/projects/:projectId/users", async (req, res) => {
     await connection.query("INSERT INTO project_members (project_id, user_id) VALUES (?, ?)", [projectId, userId]);
 
     // 활동 로그 기록 추가
-    await logActivity(connection, requesterId, projectId, null, "MEMBER_ADDED", {
+    await logActivity(connection, requesterId, projectId, null, "사용자 추가", {
         addedUsername: username
     });
     
@@ -1473,7 +1470,7 @@ app.put("/api/projects/:projectId/members/:memberId", async (req, res) => {
     // 2. 활동 로그 기록 추가
     // 로그에 사용자 이름을 남기기 위해 DB에서 조회합니다.
     const [targetUser] = await connection.query("SELECT username FROM users WHERE user_id = ?", [memberId]);
-    await logActivity(connection, requesterId, projectId, null, "MEMBER_ROLE_CHANGED", {
+    await logActivity(connection, requesterId, projectId, null, "사용자 권한 변경", {
         targetUsername: targetUser[0]?.username || `user_id ${memberId}`,
         newRole: newRole
     });
@@ -1626,7 +1623,7 @@ app.delete("/api/projects/:projectId/members/:memberId", async (req, res) => {
     }
 
     // 5. 활동 로그 기록
-    await logActivity(connection, requesterId, projectId, null, "MEMBER_REMOVED", {
+    await logActivity(connection, requesterId, projectId, null, "사용자 추방", {
         removedUsername: removedUsername,
         removedUserId: memberId
     });
