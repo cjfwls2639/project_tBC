@@ -1085,6 +1085,7 @@ const MainPage = () => {
     (p) => p.project_id === selectedProjectId
   );
 
+  // ***** (새로운 기능) 현재 사용자가 매니저인지 확인하는 변수 *****
   const isCurrentUserProjectManager =
     selectedProject?.role_in_project === "manager";
   const isCurrentUserProjectOwner =
