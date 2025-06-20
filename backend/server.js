@@ -1612,6 +1612,80 @@ app.put("/api/projects/:projectId/owner", async (req, res) => {
   }
 });
 
+// --- 11. 프로젝트 멤버 삭제 API ---
+app.delete("/api/projects/:projectId/members/:memberId", async (req, res) => {
+  const { projectId, memberId } = req.params;
+  const { requesterId } = req.body; // 요청자 ID는 body로 받음
+
+  if (!requesterId) {
+    return res.status(401).json({ error: "요청자 ID가 필요합니다." });
+  }
+
+  // 자기 자신을 삭제하려는 경우 방지
+  if (parseInt(requesterId) === parseInt(memberId)) {
+    return res.status(400).json({ error: "자기 자신을 프로젝트에서 제외할 수 없습니다." });
+  }
+
+  const connection = await db.promise().getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // 1. 요청자의 권한 확인 (매니저 여부)
+    const [requesterRows] = await connection.query(
+      "SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?",
+      [projectId, requesterId]
+    );
+
+    if (requesterRows.length === 0 || requesterRows[0].role_in_project !== 'manager') {
+      await connection.rollback();
+      return res.status(403).json({ error: "멤버를 삭제할 권한이 없습니다. (매니저 전용)" });
+    }
+
+    // 2. 삭제 대상이 프로젝트 생성자인지 확인 (생성자 보호)
+    const [projectRows] = await connection.query("SELECT created_by FROM projects WHERE project_id = ?", [projectId]);
+    if (projectRows.length > 0 && projectRows[0].created_by === parseInt(memberId)) {
+      await connection.rollback();
+      return res.status(403).json({ error: "프로젝트 생성자는 제외할 수 없습니다." });
+    }
+
+    // 3. 로그 기록을 위해 삭제될 사용자의 이름 조회
+    const [targetUser] = await connection.query("SELECT username FROM users WHERE user_id = ?", [memberId]);
+    if (targetUser.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ error: "삭제할 사용자를 찾을 수 없습니다." });
+    }
+    const removedUsername = targetUser[0].username;
+
+    // 4. project_members 테이블에서 사용자 삭제
+    const [deleteResult] = await connection.query(
+      "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
+      [projectId, memberId]
+    );
+
+    if (deleteResult.affectedRows === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: "프로젝트에 해당 사용자가 없거나 이미 제외되었습니다." });
+    }
+
+    // 5. 활동 로그 기록
+    await logActivity(connection, requesterId, projectId, null, "MEMBER_REMOVED", {
+        removedUsername: removedUsername,
+        removedUserId: memberId
+    });
+
+    await connection.commit();
+    res.json({ message: "사용자가 프로젝트에서 성공적으로 제외되었습니다." });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error("멤버 삭제 중 오류:", err);
+    res.status(500).json({ error: "서버 오류로 인해 멤버 삭제에 실패했습니다." });
+  } finally {
+    connection.release();
+  }
+});
+
+
 // 서버 시작
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);

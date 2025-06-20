@@ -1074,6 +1074,31 @@ const MainPage = () => {
     }
   };
 
+  const handleRemoveMember = async (memberId, memberUsername) => {
+    if (!selectedProjectId || !user?.user_id) {
+      alert("프로젝트가 선택되지 않았거나 사용자 정보가 없습니다.");
+      return;
+    }
+
+    if (window.confirm(`정말로 '${memberUsername}'님을 프로젝트에서 제외하시겠습니까?`)) {
+      try {
+        await axios.delete(
+          `/api/projects/${selectedProjectId}/members/${memberId}`,
+          {
+            // DELETE 요청 시 body는 'data' 객체 안에 넣어야 합니다.
+            data: { requesterId: user.user_id } 
+          }
+        );
+        alert(`'${memberUsername}'님이 프로젝트에서 제외되었습니다.`);
+        fetchProjectUsers(); // 사용자 목록 새로고침
+        fetchActivityLogs(selectedProjectId); // 활동 로그 새로고침
+      } catch (err) {
+        console.error("멤버 제외 실패:", err);
+        alert(err.response?.data?.error || "멤버 제외 중 오류가 발생했습니다.");
+      }
+    }
+  };
+
   const toggleAccountMenu = () => setIsAccountMenuOpen(!isAccountMenuOpen);
   const toggleAlarmMenu = () => setIsAlarmMenuOpen(!isAlarmMenuOpen);
   const openModal = () => setIsModalOpen(true);
@@ -1612,44 +1637,52 @@ const MainPage = () => {
                           </p>
                         ) : (
                           <ul className="project-user-list">
-                        {projectUsers.map((pUser) => (
-                          <li key={pUser.user_id}>
-                            <span>
-                              ID: {pUser.user_id} - 이름: {pUser.username} - 역할: {pUser.role_in_project}
-                              {/* 생성자(Creator) 표시 */}
-                              {selectedProject?.created_by === pUser.user_id && <strong style={{color: 'purple', marginLeft: '5px'}}>(생성자)</strong>}
-                            </span>
-                            
-                            <div style={{marginLeft: 'auto'}}>
-                              {/* --- 버튼 렌더링 조건 --- */}
+                            {projectUsers.map((pUser) => (
+                              <li key={pUser.user_id}>
+                                <span>
+                                  ID: {pUser.user_id} - 이름: {pUser.username} - 역할: {pUser.role_in_project}
+                                  {/* 생성자(Creator) 표시 */}
+                                  {selectedProject?.created_by === pUser.user_id && <strong style={{color: 'purple', marginLeft: '5px'}}>(생성자)</strong>}
+                                </span>
+                                
+                                <div style={{marginLeft: 'auto', display: 'flex', gap: '10px'}}>
+                                  {/* --- 버튼 렌더링 조건 --- */}
 
-                              {/* 1. 멤버를 매니저로 '승격' 버튼 */}
-                              {/* 조건: (나는 매니저) AND (대상은 멤버) */}
-                              {isCurrentUserProjectManager && pUser.role_in_project === 'member' && (
-                                <button 
-                                    onClick={() => handlePromoteToManager(pUser.user_id)}
-                                    className="promote-manager-btn"
-                                    style={{marginLeft: '10px'}}
-                                >
-                                    매니저로 지정
-                                </button>
-                              )}
+                                  {/* '매니저로 지정' 버튼 */}
+                                  {isCurrentUserProjectManager && pUser.role_in_project === 'member' && (
+                                    <button 
+                                        onClick={() => handlePromoteToManager(pUser.user_id)}
+                                        className="promote-manager-btn"
+                                    >
+                                        매니저로 지정
+                                    </button>
+                                  )}
 
-                              {/* 2. 매니저를 멤버로 '강등' 버튼 */}
-                              {/* 조건: (나는 매니저) AND (대상은 매니저) AND (대상은 내가 아님) AND (대상은 생성자가 아님) */}
-                              {isCurrentUserProjectManager && pUser.role_in_project === 'manager' && user.user_id !== pUser.user_id && pUser.user_id !== selectedProject.created_by && (
-                                  <button 
-                                      onClick={() => handleDemoteToMember(pUser.user_id)}
-                                      className="demote-member-btn"
-                                      style={{marginLeft: '10px', backgroundColor: '#f39c12'}}
-                                  >
-                                      멤버로 강등
-                                  </button>
-                              )}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
+                                  {/* '멤버로 강등' 버튼 */}
+                                  {isCurrentUserProjectManager && pUser.role_in_project === 'manager' && user.user_id !== pUser.user_id && pUser.user_id !== selectedProject.created_by && (
+                                      <button 
+                                          onClick={() => handleDemoteToMember(pUser.user_id)}
+                                          className="demote-member-btn"
+                                      >
+                                          멤버로 강등
+                                      </button>
+                                  )}
+
+                                  {/* '삭제' 버튼 (새로 추가) */}
+                                  {/* 조건: (나는 매니저) AND (대상은 내가 아님) AND (대상은 생성자가 아님) */}
+                                  {isCurrentUserProjectManager && user.user_id !== pUser.user_id && pUser.user_id !== selectedProject.created_by && (
+                                      <button 
+                                          onClick={() => handleRemoveMember(pUser.user_id, pUser.username)}
+                                          className="remove-member-btn"
+                                          style={{backgroundColor: '#c0392b'}} // 빨간색 계열
+                                      >
+                                          삭제
+                                      </button>
+                                  )}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
                         )}
                       </div>
                     )}
