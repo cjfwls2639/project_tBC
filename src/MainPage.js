@@ -11,14 +11,23 @@ import TaskAssignees from "./TaskAssignees.js";
 import "./styles/TaskAssingees.css";
 
 // d-day 계산 함수
-const calculateDDay = (endDate) => {
-  if (!endDate) return "없음";
-  const target = new Date(endDate);
-  if (isNaN(target)) return "없음";
+const calculateDDay = (endDateStr) => {
+  if (!endDateStr) return "없음";
+
   const today = new Date();
-  const diff = Math.ceil((target - today) / (1000 * 60 * 60 * 24));
-  return diff > 0 ? `D-${diff}` : diff === 0 ? "D-DAY" : `D+${Math.abs(diff)}`;
+  const todayStr = today.toISOString().split("T")[0]; // YYYY-MM-DD 형식
+  const diff =
+    (new Date(endDateStr).getTime() - new Date(todayStr).getTime()) /
+    (1000 * 60 * 60 * 24);
+
+  const diffDays = Math.round(diff);
+
+  if (isNaN(diffDays)) return "없음";
+  if (diffDays > 0) return `D-${diffDays}`;
+  if (diffDays === 0) return "D-DAY";
+  return `D+${Math.abs(diffDays)}`;
 };
+
 
 // 프로젝트 생성 모달
 const ProjectModal = ({ isOpen, onClose, onSubmit }) => {
@@ -340,28 +349,6 @@ const MainPage = () => {
     setEditingProject(null); // 편집 상태 초기화
   };
 
-  // 프로젝트 수정 핸들
-  const handleEditProject = async (projectData) => {
-    if (!editingProject || !editingProject.project_id) return;
-
-    try {
-      const response = await axios.put(
-        `/api/projects/${editingProject.project_id}`,
-        {
-          name: projectData.name,
-          content: projectData.content,
-          end_date: projectData.end_date,
-        }
-      );
-      alert(response.data.message);
-      await fetchProjects();
-      closeEditModal();
-    } catch (err) {
-      console.error("프로젝트 수정 실패:", err);
-      alert("프로젝트 수정 중 오류가 발생했습니다.");
-    }
-  };
-
   const formatDate = (dateString) => {
     if (!dateString) return "없음";
     const date = new Date(dateString);
@@ -595,6 +582,43 @@ const MainPage = () => {
           "프로젝트 생성 중 오류가 발생했습니다."
       );
     }
+  };
+
+   // 서버 시간대를 UTC에서 KST로 조정하는 함수
+  const adjustToKST = (dateStr) => {
+  if (!dateStr) return null;
+  const date = new Date(dateStr);
+  const offset = date.getTimezoneOffset(); // KST로 조정
+  date.setMinutes(date.getMinutes() - offset);
+  return date.toISOString().slice(0, 10); // YYYY-MM-DD 형태로 보정
+};
+
+  // 프로젝트 수정 핸들
+  const handleEditProject = async (projectData) => {
+    if (!editingProject || !editingProject.project_id) return;
+  const rawInputDate = projectData.end_date?.trim();
+  const adjustedEndDate = rawInputDate
+    ? adjustToKST(rawInputDate)
+    : editingProject.end_date?.split("T")[0] ?? null;
+
+    try {
+        const response = await axios.put(
+          `/api/projects/${editingProject.project_id}`,
+          {
+            name: projectData.name,
+            content: projectData.content,
+            end_date: adjustedEndDate,
+          }
+        );
+
+        alert(response.data.message);
+        setEditingProject(null);
+        await fetchProjects();
+        closeEditModal();
+    } catch (err) {
+        console.error("프로젝트 수정 실패:", err);
+        alert("프로젝트 수정 중 오류가 발생했습니다.");
+        }
   };
 
   const handleDeleteProject = async () => {

@@ -353,7 +353,7 @@ app.get("/api/projects/:id", async (req, res) => {
 
 // 2.4. 프로젝트 정보 수정 (UPDATE)
 app.put("/api/projects/:id", (req, res) => {
-  // TODO: 인증 로직 추가 (프로젝트 manager 또는 owner만 수정 가능하도록)
+  // TODO: 인증 로직 추가 (프로젝트 manager만 수정 가능하도록)
   const { id } = req.params;
   const { name, content, end_date } = req.body;
   if (!name) {
