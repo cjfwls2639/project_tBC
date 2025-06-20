@@ -616,6 +616,7 @@ const MainPage = () => {
             name: projectData.name,
             content: projectData.content,
             end_date: adjustedEndDate,
+            userId: user.user_id, 
           }
         );
 
@@ -625,7 +626,12 @@ const MainPage = () => {
         closeEditModal();
     } catch (err) {
         console.error("프로젝트 수정 실패:", err);
-        alert("프로젝트 수정 중 오류가 발생했습니다.");
+        alert(
+          err.response?.data?.error || // 백엔드가 error 필드로 줄 경우
+          err.response?.data?.message || // message 필드일 수도 있음
+          `에러 코드: ${err.response?.status}` || // 403 같은 상태 코드도 출력
+          "프로젝트 수정 중 오류가 발생했습니다."
+        );
         }
   };
 
@@ -1301,7 +1307,14 @@ const MainPage = () => {
                   <div className="project-details-content">
                     {selectedTab === "메인" && (
                       <div>
-                        <h2> 프로젝트 요약 </h2>
+                        <h2> 프로젝트 요약
+                          <button
+                          className="edit-project-btn"
+                          style={{ marginLeft: "10px" }}
+                          onClick={() => openEditModal(selectedProject)}
+                        >
+                          수정
+                        </button> </h2>
                         <p>
                           <strong>프로젝트 마감일:</strong>{" "}
                           {formatDate(selectedProject.end_date)}{" "}
@@ -1347,13 +1360,6 @@ const MainPage = () => {
                           <strong>프로젝트 설명:</strong>{" "}
                           {selectedProject.content || "설명이 없습니다."}
                         </p>
-                        <button
-                          className="edit-project-btn"
-                          style={{ marginLeft: "10px" }}
-                          onClick={() => openEditModal(selectedProject)}
-                        >
-                          프로젝트 수정
-                        </button>
                       </div>
                     )}
                     {selectedTab === "업무" && (

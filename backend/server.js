@@ -359,30 +359,40 @@ app.get("/api/projects/:id", async (req, res) => {
 });
 
 // 2.4. 프로젝트 정보 수정 (UPDATE)
-app.put("/api/projects/:id", (req, res) => {
-  // TODO: 인증 로직 추가 (프로젝트 manager만 수정 가능하도록)
+app.put("/api/projects/:id", async (req, res) => {
   const { id } = req.params;
-  const { name, content, end_date } = req.body;
-  if (!name) {
-    return res.status(400).json({ error: "프로젝트 이름은 필수입니다." });
+  const { name, content, end_date, userId } = req.body;
+
+  if (!name || !userId) {
+    return res.status(400).json({ error: "프로젝트 이름과 사용자 ID는 필수입니다." });
   }
 
-  const sql =
-    "UPDATE projects SET project_name = ?, content = ?, end_date = ? WHERE project_id = ?";
-  db.query(sql, [name, content, end_date, id], (err, result) => {
-    if (err) {
-      console.error("Error updating project:", err);
-      return res
-        .status(500)
-        .json({ error: "프로젝트 수정 중 오류가 발생했습니다." });
+  const connection = await db.promise().getConnection();
+  try {
+    // 프로젝트 매니저인지 확인
+    const [rows] = await connection.query(
+      "SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?",
+      [id, userId]
+    );
+    if (rows.length === 0 || rows[0].role_in_project !== 'manager') {
+      return res.status(403).json({ error: "프로젝트 매니저만 수정할 수 있습니다." });
     }
+
+    // 실제 수정
+    const sql = "UPDATE projects SET project_name = ?, content = ?, end_date = ? WHERE project_id = ?";
+    const [result] = await connection.query(sql, [name, content, end_date, id]);
+
     if (result.affectedRows === 0) {
-      return res
-        .status(404)
-        .json({ message: "프로젝트를 찾을 수 없거나 변경 사항이 없습니다." });
+      return res.status(404).json({ message: "변경된 내용이 없습니다." });
     }
+
     res.json({ message: "프로젝트가 성공적으로 수정되었습니다." });
-  });
+  } catch (err) {
+    console.error("프로젝트 수정 중 오류 발생:", err);
+    res.status(500).json({ error: "프로젝트 수정 중 오류가 발생했습니다." });
+  } finally {
+    connection.release();
+  }
 });
 
 // 2.5. 프로젝트 삭제 (DELETE) - 연관 데이터 모두 삭제하도록 수정
