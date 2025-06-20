@@ -837,7 +837,7 @@ const MainPage = () => {
         `/api/tasks/${taskId}/assignees`,
         {
           username: usernameToAdd,
-          requesterUserId: user.user_id, // <--- 수정된 부분: 요청 바디에 requesterUserId 추가
+          requesterUserId: user.user_id,
         }
         // 만약 서버에서 req.query로 받도록 수정했다면:
         // { params: { requesterUserId: user.user_id } }
@@ -872,8 +872,17 @@ const MainPage = () => {
 
     if (window.confirm("이 담당자를 업무에서 제외하시겠습니까?")) {
       try {
+        console.log(
+          "DELETE /assignees - Sending requesterUserId in params:",
+          user.user_id
+        );
         await axios.delete(
-          `/api/tasks/${taskId}/assignees/${assigneeUserIdToRemove}`
+          `/api/tasks/${taskId}/assignees/${assigneeUserIdToRemove}`,
+          {
+            params: {
+              requesterUserId: user.user_id,
+            },
+          }
         );
         alert("담당자가 성공적으로 제외되었습니다.");
         await fetchDetailedAssignees(taskId); // 담당자 목록 새로고침
