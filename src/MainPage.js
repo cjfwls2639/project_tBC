@@ -390,22 +390,29 @@ const MainPage = () => {
     }
   }, []); // 의존성 배열 비우면 최초 마운트 시에만 생성. axios는 외부 변수이므로 안정적.
 
-  const fetchActivityLogs = useCallback(async (projectIdToFetch) => {
-    if (!projectIdToFetch) {
-      setActivityLogs([]);
-      return;
-    }
-    try {
-      const res = await axios.get("/api/activity_logs", {
-        params: { projectId: projectIdToFetch },
-      });
-      setActivityLogs(res.data);
-    } catch (err) {
-      console.error("활동 로그 불러오기 실패:", err);
-      // setActivityLogs([]); // 실패 시 빈 배열로 설정 (선택 사항)
-    }
-  }, []);
+  // 활동 로그 출력 함수
+  const fetchActivityLogs = useCallback(async () => {
+  if (!selectedProjectId) {
+    setActivityLogs([]);
+    return;
+  }
 
+  try {
+    const response = await axios.get(`/api/projects/${selectedProjectId}/logs`);
+    setActivityLogs(response.data);
+  } catch (err) {
+    console.error("활동 로그 불러오기 실패:", err);
+    alert("활동 로그를 불러오는 데 실패했습니다.");
+  }
+}, [selectedProjectId]);
+
+useEffect(() => {
+  if (selectedTab === "로그") {
+    fetchActivityLogs();
+  }
+}, [selectedTab, fetchActivityLogs]);
+
+// 프로젝트 목록 출력 함수
   const fetchProjects = useCallback(async () => {
     if (!user || !user.user_id) {
       alert("로그인이 필요합니다.");
@@ -1300,6 +1307,7 @@ const MainPage = () => {
                     </div>
                   </div>
                   <div className="project-details-content">
+                    {/* 메인 화면에서 메인 버튼을 누를 경우 */}
                     {selectedTab === "메인" && (
                       <div>
                         <h2> 프로젝트 요약
@@ -1357,6 +1365,8 @@ const MainPage = () => {
                         </p>
                       </div>
                     )}
+
+                    {/* 메인 화면에서 업무 버튼을 누를 경우 */}
                     {selectedTab === "업무" && (
                       <div className="task-section">
                         <div className="task-subtabs">
@@ -1588,6 +1598,7 @@ const MainPage = () => {
                       </div>
                     )}
 
+                    {/* 메인 화면에서 로그 버튼을 누를 경우 */}
                     {selectedTab === "로그" && (
                       <div>
                         <h2>활동 로그</h2>
@@ -1598,30 +1609,65 @@ const MainPage = () => {
                           <p>활동 로그를 불러오는 중...</p>
                         ) : (
                           <ul className="activity-log-list">
-                            {activityLogs.map((log) => (
-                              <li key={log.log_id}>
-                                [
-                                {new Date(log.created_at).toLocaleString(
-                                  "ko-KR",
-                                  { hour12: false } // 24시간 형식
-                                )}
-                                ] {log.action_type} -{" "}
-                                {typeof log.details === "string"
-                                  ? log.details
-                                  : JSON.stringify(log.details)}
-                              </li>
-                            ))}
+                            {activityLogs.map((log) => {
+                              const parsedDetails = (() => {
+                                try {
+                                  return typeof log.details === "string"
+                                    ? JSON.parse(log.details)
+                                    : log.details;
+                                } catch (e) {
+                                  return {};
+                                }
+                              })();
+                              let readableDetails = "";
+                             if (log.action_type === "프로젝트 생성") {
+                                readableDetails = `프로젝트 이름: ${parsedDetails.projectName}`;
+                              } else if (log.action_type === "프로젝트 수정") {
+                                readableDetails = `변경된 이름: ${parsedDetails.updatedName}, 설명: ${parsedDetails.updatedContent}, 마감일: ${parsedDetails.updatedEndDate}`;
+                              } else if (log.action_type === "업무 생성") {
+                                readableDetails = `업무 제목: ${parsedDetails.taskName}`;
+                              } else if (log.action_type === "업무 수정") {
+                                readableDetails = `수정된 업무 제목: ${parsedDetails.taskName}, 마감일: ${parsedDetails.dueDate}`;
+                              } else if (log.action_type === "업무 삭제") {
+                                readableDetails = `삭제된 업무 제목: ${parsedDetails.taskName}`;
+                              } else if (log.action_type === "담당자 지정") {
+                                readableDetails = `담당자 지정: ${parsedDetails.assigneeName}`;
+                              } else if (log.action_type === "담당자 제거") {
+                                readableDetails = `담당자 제거: ${parsedDetails.removedUserName}`;
+                              } else if (log.action_type === "사용자 권한 변경") {
+                                const roleLabel = {
+                                manager: "매니저",
+                                member: "구성원",
+                              };
+                              readableDetails = `${parsedDetails.targetUsername} 님의 역할이 ${roleLabel[parsedDetails.newRole] || parsedDetails.newRole}(으)로 변경되었습니다.`;
+                              } else if (log.action_type === "업무 권한 부여") {
+                                readableDetails = `${parsedDetails.assigneeUsername} 님에게 업무 권한이 부여되었습니다.`;
+                              } else if (log.action_type === "업무 권한 제외") {
+                                readableDetails = `${parsedDetails.assigneeUsername} 님의 업무 권한이 제거되었습니다.`;
+                              } else if (log.action_type === "사용자 추가") {
+                                readableDetails = `${parsedDetails.addedUsername} 님이 프로젝트에 추가되었습니다.`;
+                              } else if (log.action_type === "사용자 추방") {
+                                readableDetails = `${parsedDetails.removedUsername} 님이 프로젝트에서 추방되었습니다.`;
+                              } else {
+                                readableDetails = JSON.stringify(parsedDetails);
+                              }
+
+                              return (
+                                <li key={log.log_id}>
+                                [{formatDate(log.created_at)}]{" "}
+                                <strong>{log.user_name}</strong> 님이{" "}
+                                <span>{log.action_type.replace("_", " ").toLowerCase()}</span>했습니다.<br />
+                                {readableDetails}
+                                <br />
+                                </li>
+                              );
+                            })}
                           </ul>
                         )}
                       </div>
                     )}
-                    {/* 알람 탭은 전역 알람으로 이동했으므로 프로젝트별 알람은 불필요 */}
-                    {/* {selectedTab === "알람" && (
-                      <div>
-                        <h2> 알람 </h2>
-                      </div>
-                    )} */}
 
+                    {/* 메인 화면에서 사용자 버튼을 누를 경우 */}
                     {selectedTab === "사용자" && (
                       <div>
                         <h2>프로젝트 참여자 ({projectUsers.length}명)</h2>

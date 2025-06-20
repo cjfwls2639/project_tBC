@@ -47,6 +47,29 @@ const logActivity = async (
   }
 };
 
+// 활동 로그 조회 (프로젝트 ID 기준)
+app.get("/api/projects/:id/logs", async (req, res) => {
+  const { id } = req.params;
+  const connection = await db.promise().getConnection();
+  try {
+    const [logs] = await connection.query(
+      `SELECT logs.*, u.username AS user_name
+       FROM activity_logs logs
+       JOIN users u ON logs.user_id = u.user_id
+       WHERE logs.project_id = ?
+       ORDER BY logs.created_at DESC`,
+      [id]
+    );
+
+    res.json(logs);
+  } catch (err) {
+    console.error("로그 조회 중 오류 발생:", err);
+    res.status(500).json({ error: "활동 로그 조회 실패" });
+  } finally {
+    connection.release();
+  }
+});
+
 // --- 1. 사용자 인증 API (Users) ---
 
 // 회원가입 (Register) - 스키마에 맞게 컬럼명 수정
@@ -1431,7 +1454,7 @@ app.put("/api/projects/:projectId/members/:memberId", async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    
+    // 요청자가 매니저인지 확인
     const [requesterRows] = await connection.query(
       "SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?",
       [projectId, requesterId]
@@ -1442,6 +1465,7 @@ app.put("/api/projects/:projectId/members/:memberId", async (req, res) => {
       return res.status(403).json({ error: "멤버의 역할을 변경할 권한이 없습니다. (매니저 전용)" });
     }
 
+    // 강등 제한 조건
     if (newRole === 'member') {
       if (parseInt(requesterId) === parseInt(memberId)) {
         await connection.rollback();
@@ -1450,12 +1474,18 @@ app.put("/api/projects/:projectId/members/:memberId", async (req, res) => {
       const [projectRows] = await connection.query("SELECT created_by FROM projects WHERE project_id = ?", [projectId]);
       if (projectRows.length > 0 && projectRows[0].created_by === parseInt(memberId)) {
         await connection.rollback();
-        return res.status(403).json({ error: "프로젝트 생성자는 강등시킬 수 없습니다."});
+        return res.status(403).json({ error: "프로젝트 생성자는 강등시킬 수 없습니다." });
       }
     }
-    
 
-    // 1. 역할 업데이트 실행
+    // 기존 역할 가져오기
+    const [existingRoleRows] = await connection.query(
+      "SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?",
+      [projectId, memberId]
+    );
+    const oldRole = existingRoleRows[0]?.role_in_project ?? null;
+
+    // 역할 변경
     const [updateResult] = await connection.query(
       "UPDATE project_members SET role_in_project = ? WHERE project_id = ? AND user_id = ?",
       [newRole, projectId, memberId]
@@ -1466,12 +1496,16 @@ app.put("/api/projects/:projectId/members/:memberId", async (req, res) => {
       return res.status(404).json({ message: "역할을 변경할 사용자를 찾을 수 없습니다." });
     }
 
-    // 2. 활동 로그 기록 추가
-    // 로그에 사용자 이름을 남기기 위해 DB에서 조회합니다.
-    const [targetUser] = await connection.query("SELECT username FROM users WHERE user_id = ?", [memberId]);
+    // 대상 사용자 이름 조회
+    const [targetUser] = await connection.query(
+      "SELECT username FROM users WHERE user_id = ?", [memberId]
+    );
+
+    // 활동 로그 기록
     await logActivity(connection, requesterId, projectId, null, "사용자 권한 변경", {
-        targetUsername: targetUser[0]?.username || `user_id ${memberId}`,
-        newRole: newRole
+      targetUsername: targetUser[0]?.username || `user_id ${memberId}`,
+      oldRole,
+      newRole
     });
 
     await connection.commit();
