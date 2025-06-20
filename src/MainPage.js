@@ -34,6 +34,8 @@ const ProjectModal = ({ isOpen, onClose, onSubmit }) => {
   const [projectName, setProjectName] = useState("");
   const [dDay, setDDay] = useState("");
   const [content, setContent] = useState("");
+  const isSubmitDisabled = !projectName.trim() && !content.trim() && !dDay?.trim();
+
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -101,7 +103,11 @@ const ProjectModal = ({ isOpen, onClose, onSubmit }) => {
             >
               취소
             </button>
-            <button type="submit" className="modal-submit-btn">
+              <button 
+              type="submit" 
+              className="modal-submit-btn"
+              disabled={isSubmitDisabled}
+              >
               생성
             </button>
           </div>
@@ -118,7 +124,7 @@ const EditProjectModal = ({ isOpen, onClose, onSubmit, initialData }) => {
   );
   const [dDay, setDDay] = useState(initialData?.end_date || "");
   const [content, setContent] = useState(initialData?.content || "");
-
+  
   useEffect(() => {
     setProjectName(initialData?.project_name || "");
     setDDay(initialData?.end_date || "");
@@ -173,7 +179,9 @@ const EditProjectModal = ({ isOpen, onClose, onSubmit, initialData }) => {
             >
               취소
             </button>
-            <button type="submit" className="modal-submit-btn">
+            <button 
+            type="submit"
+            className="modal-submit-btn">
               수정
             </button>
           </div>

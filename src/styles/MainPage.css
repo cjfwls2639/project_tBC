@@ -361,3 +361,9 @@
   background-color: transparent; /* 비활성화 시 호버 효과 제거 */
   color: #bdc3c7;
 }
+
+.modal-submit-btn:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
