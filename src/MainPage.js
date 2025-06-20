@@ -853,6 +853,88 @@ const MainPage = () => {
     }
   };
 
+
+   const handlePromoteToManager = async (memberId) => {
+    if (!selectedProjectId || !user?.user_id) {
+        alert("프로젝트가 선택되지 않았거나 사용자 정보가 없습니다.");
+        return;
+    }
+    if (window.confirm("이 사용자를 매니저로 지정하시겠습니까? 매니저는 프로젝트 삭제 등 주요 권한을 갖게 됩니다.")) {
+        try {
+            const response = await axios.put(
+                `/api/projects/${selectedProjectId}/members/${memberId}`,
+                {
+                    role: 'manager',
+                    requesterId: user.user_id // 요청자 ID를 보내 권한 확인
+                }
+            );
+            alert(response.data.message);
+            fetchProjectUsers(); // 사용자 목록 새로고침
+        } catch (err) {
+            console.error("매니저 지정 실패:", err);
+            alert(err.response?.data?.error || "매니저 지정 중 오류가 발생했습니다.");
+        }
+    }
+  };
+
+   const handleTransferOwnership = async (newOwnerId) => {
+    if (!selectedProjectId || !user?.user_id) {
+      alert("프로젝트가 선택되지 않았거나 사용자 정보가 없습니다.");
+      return;
+    }
+
+    const newOwner = projectUsers.find(u => u.user_id === newOwnerId);
+    const confirmation = window.prompt(
+      `정말로 '${newOwner?.username}'님에게 소유권을 이전하시겠습니까?\n이 작업은 되돌릴 수 없으며, 당신은 더 이상 프로젝트를 삭제할 수 없게 됩니다.\n\n동의하시면 프로젝트 이름('${selectedProject.project_name}')을 정확하게 입력해주세요.`
+    );
+
+    if (confirmation !== selectedProject.project_name) {
+      alert("프로젝트 이름이 일치하지 않아 취소되었습니다.");
+      return;
+    }
+
+    try {
+      const response = await axios.put(
+        `/api/projects/${selectedProjectId}/owner`,
+        {
+          requesterId: user.user_id, // 현재 소유자 ID
+          newOwnerId: newOwnerId,   // 새로운 소유자 ID
+        }
+      );
+      alert(response.data.message);
+      // 소유권 이전 후 프로젝트 목록과 사용자 목록을 모두 새로고침
+      await fetchProjects();
+      await fetchProjectUsers();
+    } catch (err) {
+      console.error("소유권 이전 실패:", err);
+      alert(err.response?.data?.error || "소유권 이전 중 오류가 발생했습니다.");
+    }
+  };
+
+   const handleDemoteToMember = async (memberId) => {
+    if (!selectedProjectId || !user?.user_id) {
+      alert("프로젝트가 선택되지 않았거나 사용자 정보가 없습니다.");
+      return;
+    }
+    const memberToDemote = projectUsers.find(u => u.user_id === memberId);
+    if (window.confirm(`'${memberToDemote?.username}'님을 'member' 등급으로 강등하시겠습니까?`)) {
+      try {
+        const response = await axios.put(
+          `/api/projects/${selectedProjectId}/members/${memberId}`,
+          {
+            role: 'member', // 역할을 'member'로 지정
+            requesterId: user.user_id
+          }
+        );
+        alert(response.data.message);
+        fetchProjectUsers(); // 사용자 목록 새로고침
+      } catch (err) {
+        console.error("멤버 강등 실패:", err);
+        alert(err.response?.data?.error || "멤버 강등 중 오류가 발생했습니다.");
+      }
+    }
+  };
+
   const toggleAccountMenu = () => setIsAccountMenuOpen(!isAccountMenuOpen);
   const toggleAlarmMenu = () => setIsAlarmMenuOpen(!isAlarmMenuOpen);
   const openModal = () => setIsModalOpen(true);
@@ -864,6 +946,10 @@ const MainPage = () => {
   const selectedProject = projects.find(
     (p) => p.project_id === selectedProjectId
   );
+
+  // ***** (새로운 기능) 현재 사용자가 매니저인지 확인하는 변수 *****
+  const isCurrentUserProjectManager = selectedProject?.role_in_project === 'manager';
+  const isCurrentUserProjectOwner = selectedProject?.created_by === user?.user_id;
 
   return (
     <div>
@@ -1341,8 +1427,52 @@ const MainPage = () => {
                           <ul className="project-user-list">
                             {projectUsers.map((pUser) => (
                               <li key={pUser.user_id}>
-                                ID: {pUser.user_id} - 이름: {pUser.username}
-                                {/* 필요하다면 사용자 제거 버튼 등 추가 */}
+                                <span>
+                                  ID: {pUser.user_id} - 이름: {pUser.username} - 역할: {pUser.role_in_project}
+                                  {/* 현재 유저가 소유자임을 표시 */}
+                                  {selectedProject?.created_by === pUser.user_id && <strong style={{color: 'purple', marginLeft: '5px'}}>(소유자)</strong>}
+                                </span>
+                                
+                                {/* 버튼들을 담을 컨테이너 */}
+                                <div style={{marginLeft: 'auto'}}>
+                                  {/* --- 버튼 렌더링 조건 --- */}
+
+                                  {/* 1. 멤버를 매니저로 '승격' 버튼 */}
+                                  {/* 조건: (나는 소유자 또는 매니저) AND (대상은 멤버) */}
+                                  {(isCurrentUserProjectOwner || isCurrentUserProjectManager) && pUser.role_in_project === 'member' && (
+                                    <button 
+                                        onClick={() => handlePromoteToManager(pUser.user_id)}
+                                        className="promote-manager-btn"
+                                        style={{marginLeft: '10px'}}
+                                    >
+                                        매니저로 지정
+                                    </button>
+                                  )}
+
+                                  {/* 2. 매니저를 멤버로 '강등' 버튼 */}
+                                  {/* 조건: (나는 소유자) AND (대상은 매니저) AND (대상은 내가 아님) */}
+                                  {isCurrentUserProjectOwner && pUser.role_in_project === 'manager' && user.user_id !== pUser.user_id && (
+                                      <button 
+                                          onClick={() => handleDemoteToMember(pUser.user_id)}
+                                          className="demote-member-btn"
+                                          style={{marginLeft: '10px', backgroundColor: '#f39c12'}}
+                                      >
+                                          멤버로 강등
+                                      </button>
+                                  )}
+
+                                  {/* 3. '소유권 이전' 버튼 */}
+                                  {/* 조건: (나는 소유자) AND (대상은 내가 아님) */}
+                                  {isCurrentUserProjectOwner && user.user_id !== pUser.user_id && (
+                                    <button 
+                                        onClick={() => handleTransferOwnership(pUser.user_id)}
+                                        className="transfer-owner-btn"
+                                        style={{marginLeft: '10px'}}
+                                    >
+                                        소유권 이전
+                                    </button>
+                                  )}
+                                </div>
                               </li>
                             ))}
                           </ul>

@@ -1216,6 +1216,149 @@ app.get("/api/projects/:projectId/users", async (req, res) => {
   }
 });
 
+
+// --- 8. 프로젝트 멤버 역할 변경 API (승격/강등 통합) ---
+app.put("/api/projects/:projectId/members/:memberId", async (req, res) => {
+  const { projectId, memberId } = req.params;
+  const { requesterId, role: newRole } = req.body; // newRole: 'manager' 또는 'member'
+
+  if (!requesterId || !newRole || !['manager', 'member'].includes(newRole)) {
+    return res.status(400).json({ error: "요청 정보가 올바르지 않습니다." });
+  }
+
+  const connection = await db.promise().getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // 1. 요청자의 권한 정보 확인 (프로젝트 소유자인지, 역할이 무엇인지)
+    const [projectRows] = await connection.query("SELECT created_by FROM projects WHERE project_id = ?", [projectId]);
+    const [requesterRows] = await connection.query("SELECT role_in_project FROM project_members WHERE project_id = ? AND user_id = ?", [projectId, requesterId]);
+
+    if (projectRows.length === 0 || requesterRows.length === 0) {
+      return res.status(404).json({ error: "프로젝트 또는 요청자 정보를 찾을 수 없습니다." });
+    }
+
+    const isOwner = projectRows[0].created_by === requesterId;
+    const requesterRole = requesterRows[0].role_in_project;
+
+    // 2. 권한 검사
+    let authorized = false;
+    // Case 1: 매니저로 승격시키는 경우 -> 소유자 또는 매니저가 할 수 있음
+    if (newRole === 'manager') {
+      if (isOwner || requesterRole === 'manager') {
+        authorized = true;
+      }
+    }
+    // Case 2: 멤버로 강등시키는 경우 -> 오직 소유자만 할 수 있음
+    else if (newRole === 'member') {
+      if (isOwner) {
+        // 소유자는 자기 자신을 강등시킬 수 없음
+        if (projectRows[0].created_by === parseInt(memberId)) {
+           return res.status(400).json({ error: "프로젝트 소유자는 역할을 변경할 수 없습니다." });
+        }
+        authorized = true;
+      }
+    }
+
+    if (!authorized) {
+      return res.status(403).json({ error: "멤버의 역할을 변경할 권한이 없습니다." });
+    }
+
+    // 3. 대상 멤버의 역할 업데이트 실행
+    const [updateResult] = await connection.query(
+      "UPDATE project_members SET role_in_project = ? WHERE project_id = ? AND user_id = ?",
+      [newRole, projectId, memberId]
+    );
+
+    if (updateResult.affectedRows === 0) {
+      return res.status(404).json({ message: "역할을 변경할 사용자를 찾을 수 없습니다." });
+    }
+
+    await connection.commit();
+    res.json({ message: "사용자의 역할이 성공적으로 변경되었습니다." });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error("멤버 역할 변경 중 오류:", err);
+    res.status(500).json({ error: "서버 오류로 인해 역할 변경에 실패했습니다." });
+  } finally {
+    connection.release();
+  }
+});
+
+// server.js 파일 맨 아래, app.listen 위에 추가
+
+// --- 9. 프로젝트 소유권 이전 API ---
+app.put("/api/projects/:projectId/owner", async (req, res) => {
+  const { projectId } = req.params;
+  // requesterId: 현재 소유자, newOwnerId: 새로 소유자가 될 사용자
+  const { requesterId, newOwnerId } = req.body;
+
+  if (!requesterId || !newOwnerId) {
+    return res.status(400).json({ error: "요청자 ID와 새로운 소유자 ID가 모두 필요합니다." });
+  }
+
+  if (requesterId === newOwnerId) {
+    return res.status(400).json({ error: "자기 자신에게 소유권을 이전할 수 없습니다." });
+  }
+
+  const connection = await db.promise().getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // 1. 현재 프로젝트의 소유자 정보 확인
+    const [projectRows] = await connection.query(
+      "SELECT created_by FROM projects WHERE project_id = ?",
+      [projectId]
+    );
+
+    if (projectRows.length === 0) {
+      throw new Error("프로젝트를 찾을 수 없습니다.");
+    }
+
+    const currentOwnerId = projectRows[0].created_by;
+
+    // 2. 요청자가 현재 소유자인지 권한 확인
+    if (currentOwnerId !== requesterId) {
+      return res.status(403).json({ error: "프로젝트 소유자만 소유권을 이전할 수 있습니다." });
+    }
+
+    // 3. 새로운 소유자가 프로젝트 멤버인지 확인
+    const [memberRows] = await connection.query(
+        "SELECT * FROM project_members WHERE project_id = ? AND user_id = ?",
+        [projectId, newOwnerId]
+    );
+
+    if (memberRows.length === 0) {
+        return res.status(400).json({ error: "새로운 소유자는 반드시 프로젝트에 참여한 멤버여야 합니다." });
+    }
+
+    // 4. 프로젝트 소유자 변경 (projects 테이블 업데이트)
+    await connection.query(
+      "UPDATE projects SET created_by = ? WHERE project_id = ?",
+      [newOwnerId, projectId]
+    );
+    
+    // 5. 새로운 소유자의 역할을 'manager'로 승격 (이미 매니저가 아니라면)
+    if (memberRows[0].role_in_project !== 'manager') {
+        await connection.query(
+            "UPDATE project_members SET role_in_project = 'manager' WHERE project_id = ? AND user_id = ?",
+            [projectId, newOwnerId]
+        );
+    }
+
+    await connection.commit();
+    res.json({ message: "프로젝트 소유권이 성공적으로 이전되었습니다." });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error("프로젝트 소유권 이전 중 오류:", err);
+    res.status(500).json({ error: "서버 오류로 인해 소유권 이전에 실패했습니다." });
+  } finally {
+    connection.release();
+  }
+});
+
 // 서버 시작
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
