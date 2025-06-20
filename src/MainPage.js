@@ -1627,9 +1627,9 @@ useEffect(() => {
                               } else if (log.action_type === "업무 생성") {
                                 readableDetails = `업무 제목: ${parsedDetails.taskName}`;
                               } else if (log.action_type === "업무 수정") {
-                                readableDetails = `수정된 업무 제목: ${parsedDetails.taskName}, 마감일: ${parsedDetails.dueDate}`;
+                                readableDetails = `수정된 업무 제목: ${parsedDetails.updatedTaskName}, 마감일: ${parsedDetails.dueDate}`;
                               } else if (log.action_type === "업무 삭제") {
-                                readableDetails = `삭제된 업무 제목: ${parsedDetails.taskName}`;
+                                readableDetails = `삭제된 업무 제목: ${parsedDetails.deletedTaskName}`;
                               } else if (log.action_type === "담당자 지정") {
                                 readableDetails = `담당자 지정: ${parsedDetails.assigneeName}`;
                               } else if (log.action_type === "담당자 제거") {

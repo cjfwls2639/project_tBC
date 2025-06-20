@@ -837,6 +837,7 @@ app.put("/api/tasks/:taskId", async (req, res) => {
       await logActivity(connection, requesterId, projectId, taskId, "업무 수정", {
         updatedTaskName: title,
         newStatus: status,
+        dueDate: due_date
       });
     }
 
@@ -850,6 +851,8 @@ app.put("/api/tasks/:taskId", async (req, res) => {
     connection.release();
   }
 });
+
+//업무 삭제
 app.delete("/api/tasks/:id", async (req, res) => {
   const { userId } = req.body;
   const { id: taskId } = req.params;
