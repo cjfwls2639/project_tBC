@@ -1150,17 +1150,12 @@ const MainPage = () => {
                   className="alarm-menu"
                   style={{ display: isAlarmMenuOpen ? "block" : "none" }}
                 >
-                  {/* alarms 로딩 상태를 별도로 관리한다면 loading && alarms.length === 0 대신 alarmsLoading 사용 */}
-                  {alarms.length === 0 && !error ? ( // 에러가 없고 알람이 없을 때
-                    <div className="alarm-item">알림이 없습니다.</div>
-                  ) : error ? ( // 전역 에러 상태를 알람에 표시하는 것은 부적절할 수 있음
-                    <div className="alarm-item error">
-                      알림 로딩 중 오류가 발생했습니다.
-                    </div>
+                  {alarms.length === 0 ? (
+                    <div className="alarm-item">마감 임박 업무가 없습니다.</div>
                   ) : (
                     <ul className="alarm-list">
                       <li className="alarm-header">
-                        마감 임박 태스크 ({alarmCount}개)
+                        마감 임박 업무 ({alarmCount}개)
                       </li>
                       {alarms.map((task) => (
                         <li key={task.task_id} className="alarm-item">

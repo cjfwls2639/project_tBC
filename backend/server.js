@@ -484,14 +484,12 @@ app.get("/api/tasks/due_date", (req, res) => {
   }
 
   // due_date가 오늘부터 7일 이내이면서 해당 userId에게 할당된 태스크를 조회합니다.
-  // CURDATE(): 현재 날짜를 반환하는 SQL 함수 (MySQL 기준)
-  // INTERVAL 7 DAY: 현재 날짜에 7일을 더하는 연산
-  // BETWEEN A AND B: A와 B 사이에 있는 값 (A와 B 포함)
   const sql = `
-    SELECT t.*
+    SELECT t.task_id, t.task_name, t.due_date
     FROM tasks t
     JOIN task_assignees ta ON t.task_id = ta.task_id
     WHERE ta.user_id = ?
+      AND t.status <> 'done' -- 완료되지 않은 업무만
       AND t.due_date IS NOT NULL
       AND t.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
     ORDER BY t.due_date ASC;
@@ -504,10 +502,11 @@ app.get("/api/tasks/due_date", (req, res) => {
         .status(500)
         .json({ error: "알림 목록을 불러오는 중 오류가 발생했습니다." });
     }
-    res.json(results);
+    // task_name을 title로 변경하여 프론트엔드와 일관성 유지
+    const alarms = results.map(task => ({ ...task, title: task.task_name }));
+    res.json(alarms);
   });
 });
-
 const nodemailer = require("nodemailer");
 const crypto = require("crypto"); // Node.js 내장 모듈
 
