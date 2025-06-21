@@ -1644,6 +1644,10 @@ useEffect(() => {
                                 readableDetails = `${parsedDetails.assigneeUsername} 님에게 업무 권한이 부여되었습니다.`;
                               } else if (log.action_type === "업무 권한 제외") {
                                 readableDetails = `${parsedDetails.assigneeUsername} 님의 업무 권한이 제거되었습니다.`;
+                              } else if (log.action_type === "댓글 작성") {
+                                readableDetails = `내용: ${parsedDetails.commentContent}`;
+                              } else if (log.action_type === "댓글 삭제") {
+                                readableDetails = `삭제한 댓글: ${parsedDetails.deletedComment}`;
                               } else if (log.action_type === "사용자 추가") {
                                 readableDetails = `${parsedDetails.addedUsername} 님이 프로젝트에 추가되었습니다.`;
                               } else if (log.action_type === "사용자 추방") {
